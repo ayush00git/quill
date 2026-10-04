@@ -185,19 +185,21 @@ submit() {
 
   out="$home/post/$(pr_slug "$owner" "$repo" "$number").json"
   [ -f "$out" ] || die "no payload for $key: run post.sh --dry-run $key first" 6
-  sha="$(sha256_file "$out")"
-  [ "$sha" = "$want_sha" ] || die "refusing: the payload changed since the dry run (sha256 $sha, expected $want_sha); run --dry-run again" 5
-  check_payload_text "$out"
-
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/quill-post.XXXXXX")" || exit 1
   POST_TMP="$tmp"
   trap 'rm -rf "$POST_TMP"' EXIT
+  # Hash, scan and send one private copy, so the bytes posted are exactly the
+  # bytes whose sha256 you confirmed.
+  cp "$out" "$tmp/payload.json"
+  sha="$(sha256_file "$tmp/payload.json")"
+  [ "$sha" = "$want_sha" ] || die "refusing: the payload changed since the dry run (sha256 $sha, expected $want_sha); run --dry-run again" 5
+  check_payload_text "$tmp/payload.json"
 
   # Re-check what may have changed since the dry run.
   gh_json "$tmp/pr.json" "repos/$owner/$repo/pulls/$number"
   [ "$(jq -r .state "$tmp/pr.json")" = open ] || die "$key isn't open any more; nothing posted"
   head="$(jq -r .head.sha "$tmp/pr.json")"
-  [ "$head" = "$(jq -r .commit_id "$out")" ] ||
+  [ "$head" = "$(jq -r .commit_id "$tmp/payload.json")" ] ||
     die "$key moved to ${head:0:7} since the dry run; review it again with /quill:quill $key" 3
   me="$(gh api --method GET user --jq .login)" || die "gh isn't authenticated (run: gh auth login)"
   gh_json "$tmp/reviews.json" "repos/$owner/$repo/pulls/$number/reviews" --paginate --slurp
@@ -207,21 +209,23 @@ submit() {
   fi
 
   # The one GitHub write quill ever makes.
-  if ! gh api --method POST "repos/$owner/$repo/pulls/$number/reviews" --input "$out" >"$tmp/resp.json" 2>"$tmp/resp.err"; then
+  if ! gh api --method POST "repos/$owner/$repo/pulls/$number/reviews" --input "$tmp/payload.json" >"$tmp/resp.json" 2>"$tmp/resp.err"; then
     die "GitHub refused the review: $(jq -r '.message // empty' "$tmp/resp.json" 2>/dev/null) $(head -1 "$tmp/resp.err")"
   fi
   [ "$(jq -r .state "$tmp/resp.json")" = PENDING ] ||
     warn "GitHub reports the review as $(jq -r .state "$tmp/resp.json"), not PENDING; check it on GitHub now"
 
   lock_acquire "$home/.state.lock" 30
-  if jq --arg k "$key" --slurpfile r "$tmp/resp.json" --arg at "$(now_iso)" --slurpfile p "$out" \
+  if jq --arg k "$key" --slurpfile r "$tmp/resp.json" --arg at "$(now_iso)" --slurpfile p "$tmp/payload.json" \
     '.prs[$k].posted = {reviewId: $r[0].id, at: $at, state: $r[0].state, url: $r[0].html_url,
                         commitId: $p[0].commit_id, comments: ($p[0].comments | length)}' \
     "$home/state.json" >"$tmp/state.json"; then
     mv -f "$tmp/state.json" "$home/state.json"
+  else
+    warn "the review was created, but recording it in $home/state.json failed"
   fi
   lock_release "$home/.state.lock"
-  mv -f "$out" "${out%.json}.posted.json"
+  cp "$tmp/payload.json" "${out%.json}.posted.json" && rm -f "$out"
 
   jq -r --arg key "$key" --slurpfile p "${out%.json}.posted.json" \
     '"Created a pending review on \($key) with \($p[0].comments | length) inline comment(s). Only you can see it until you submit it on GitHub: \(.html_url)"' \

@@ -73,7 +73,7 @@ Run git only as one plain command of the form `git -C <worktree> <diff|log|show|
 - New source files carry the Apache license header, in the form the repo already uses (an existing file of the same type is the reference). Many ASF builds run Apache RAT and fail without it.
 - No ASF Category X dependencies, for example GPL, LGPL, AGPL, SSPL, BUSL, Commons Clause or the JSON.org license. See https://www.apache.org/legal/resolved.html. Category B (for example EPL, MPL) only in binary form, with the required notices.
 - Bundled third-party code updates `LICENSE` and `NOTICE` as the project requires.
-- AI-assisted work is allowed. Under the ASF Generative Tooling Guidance (https://www.apache.org/legal/generative-tooling.html), a `Generated-by:` token in the commit message is the recommended practice. Its absence is a question to ask, never an accusation. Never claim a PR is AI-generated.
+- AI-assisted work is allowed. Under the ASF Generative Tooling Guidance (https://www.apache.org/legal/generative-tooling.html), a `Generated-by:` token in the commit message is the recommended practice. Only when the PR itself says AI tools were used and no commit carries the token, ask for it neutrally. Never ask whether AI was used, and never claim a PR is AI-generated.
 
 ### 9. Docs
 - User-facing changes update the docs and the changelog or release notes the repo uses.

@@ -11,7 +11,7 @@
 # Requires lib/common.sh and lib/repo.sh.
 
 _is_sha() {
-  case "$1" in *[!0-9a-f]* | '') return 1 ;; esac
+  case "$1" in *[!0123456789abcdef]* | '') return 1 ;; esac
   [ "${#1}" -eq 40 ]
 }
 

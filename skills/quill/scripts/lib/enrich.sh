@@ -34,10 +34,15 @@ _enrich_batch() {
   local batch="$1" viewer="$2" out="$3" query resp="$3.resp"
   query="$(_enrich_query <"$batch")" || die "refusing to query an invalid PR reference"
   # gh exits non-zero when any alias fails but still prints the partial data.
-  gh api graphql --method POST -f query="$query" -f me="$viewer" >"$resp" 2>/dev/null || true
+  gh api graphql --method POST -f query="$query" -f me="$viewer" >"$resp" 2>"$resp.err" || true
   if ! jq -e '.data | type == "object"' "$resp" >/dev/null 2>&1; then
-    die "GitHub GraphQL request failed: $(jq -r '[.errors[]?.message] | join("; ")' "$resp" 2>/dev/null)"
+    # GraphQL errors when there are any, else gh's own message (auth, network, rate limit).
+    local why
+    why="$(jq -r '[.errors[]?.message] | join("; ")' "$resp" 2>/dev/null || true)"
+    [ -n "$why" ] || why="$(head -c 500 "$resp.err" | tr '\n' ' ')"
+    die "GitHub GraphQL request failed: $why"
   fi
+  rm -f "$resp.err"
   jq -r --slurpfile items "$batch" '
     . as $resp | $items[0] | to_entries[]
     | select($resp.data["p\(.key)"].pullRequest == null)

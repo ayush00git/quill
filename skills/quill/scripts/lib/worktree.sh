@@ -21,9 +21,11 @@ QUILL_SPARSE_PATTERNS='/*
 !**/[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
 !**/.[Cc][Ll][Aa][Uu][Dd][Ee]/'
 
-# worktree_path <owner/name> <N>
+# worktree_path <owner/name> <N>. Both parts are validated: the result is
+# handed to rm -rf by remove_worktree.
 worktree_path() {
   valid_repo "$1" || die "not a repository (want owner/name): $1"
+  case "$2" in '' | 0* | *[!0-9]*) die "not a PR number: $2" ;; esac
   printf '%s/worktrees/%s\n' "$(quill_home)" "$(pr_slug "${1%%/*}" "${1#*/}" "$2")"
 }
 

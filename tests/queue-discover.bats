@@ -40,7 +40,7 @@ JSON
   reviewed_fixture
   run "$SCRIPTS/queue.sh" --run-dir "$RUN"
   [ "$status" -eq 0 ]
-  [ "$output" = "queue: 3 open PR(s) found (review requested: 2, reviewed before: 2)" ]
+  [ "$output" = "queue: 3 open PR(s) found (review requested: 2, reviewed before: 2, in watched repos: 0)" ]
   run jq -c '[.items[] | [.repo, .number, (.sources | join("+"))]]' "$RUN/queue.json"
   [ "$output" = '[["apache/bar",3,"review-requested"],["apache/foo",7,"review-requested+reviewed-by"],["apache/foo",12,"reviewed-by"]]' ]
   run jq -r '.viewer, .version' "$RUN/queue.json"
@@ -62,7 +62,7 @@ JSON
 JSON
   run "$SCRIPTS/queue.sh" --run-dir "$RUN"
   [ "$status" -eq 0 ]
-  [ "$output" = "queue: 0 open PR(s) found (review requested: 0, reviewed before: 0)" ]
+  [ "$output" = "queue: 0 open PR(s) found (review requested: 0, reviewed before: 0, in watched repos: 0)" ]
   run jq -c .items "$RUN/queue.json"
   [ "$output" = "[]" ]
 }

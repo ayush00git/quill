@@ -40,8 +40,9 @@ worktree_unsafe_entries() {
 # remove_worktree <owner/name> <N>: drop the worktree and git's record of it.
 remove_worktree() {
   local gd wt
-  gd="$(repo_git_dir "$1")"
-  wt="$(worktree_path "$1" "$2")"
+  # explicit checks: callers may not run with set -e, and wt goes to rm -rf
+  gd="$(repo_git_dir "$1")" || return 1
+  wt="$(worktree_path "$1" "$2")" || return 1
   if [ -e "$wt" ]; then
     qgit --git-dir="$gd" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"
   fi
@@ -59,8 +60,8 @@ add_worktree() {
     *[!0-9a-f]* | '') die "not a full commit SHA: $sha" ;;
   esac
   [ "${#sha}" -eq 40 ] || die "not a full commit SHA: $sha"
-  gd="$(repo_git_dir "$repo")"
-  wt="$(worktree_path "$repo" "$number")"
+  gd="$(repo_git_dir "$repo")" || return 1
+  wt="$(worktree_path "$repo" "$number")" || return 1
   [ -d "$gd" ] || die "no cached clone for $repo (run ensure_clone first)"
 
   if [ -e "$wt" ]; then

@@ -177,6 +177,18 @@ prepare_pr() {
   done
 }
 
+@test "worktree paths reject PR numbers that aren't plain numbers (remove_worktree runs rm -rf)" {
+  mkdir -p "$QUILL_HOME/keep"
+  local bad
+  for bad in "" "0" "01" "1a" "../../keep" "1/../../keep"; do
+    run worktree_path apache/foo "$bad"
+    [ "$status" -ne 0 ]
+    run remove_worktree apache/foo "$bad"
+    [ "$status" -ne 0 ]
+  done
+  [ -d "$QUILL_HOME/keep" ]
+}
+
 @test "worktree_unsafe_entries finds what must never be checked out" {
   mkdir -p "$TEST_TMP/w/a/.CLAUDE" "$TEST_TMP/w/.git"
   printf 'x\n' >"$TEST_TMP/w/a/Claude.Md"

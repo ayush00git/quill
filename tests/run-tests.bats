@@ -154,6 +154,17 @@ tests_json() { jq -r "$1" "$CTX/tests.json"; }
   [[ "$(grep '^run ' "$DOCKER_STUB_DIR/calls")" == *"--network none "*"--memory 2g --cpus 1 "* ]] || false
 }
 
+@test "tests.cacheVolumes: a named volume per repo as HOME, never a host path" {
+  prepared_run
+  printf '%s\n' '{"tests": {"cacheVolumes": true, "repos": {"apache/foo": {"image": "busybox", "command": "true"}}}}' >"$QUILL_HOME/config.json"
+  run "$SCRIPTS/run-tests.sh" --run-dir "$RUN"
+  [ "$status" -eq 0 ]
+  local cmd
+  cmd="$(grep '^run ' "$DOCKER_STUB_DIR/calls")"
+  [[ "$cmd" == *"-e HOME=/tmp/home --mount type=volume,src=quill-cache-apache__foo,dst=/tmp/home busybox "* ]] || false
+  [ "$(grep -o -- '--mount' <<<"$cmd" | wc -l | tr -d ' ')" = "1" ]
+}
+
 @test "an unusable runtime or an unknown one means not run, never passed" {
   prepared_run
   DOCKER_STUB_INFO_EXIT=1 run "$SCRIPTS/run-tests.sh" --run-dir "$RUN"

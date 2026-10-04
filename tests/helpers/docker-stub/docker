@@ -5,8 +5,7 @@
 # $DOCKER_STUB_DIR/calls (one per line, then "--").
 #   info   exits $DOCKER_STUB_INFO_EXIT (default 0), printing a message on failure
 #   run    saves the tar from stdin's file list to $DOCKER_STUB_DIR/tarlist,
-#          the environment it would pass to env.txt, sleeps
-#          $DOCKER_STUB_SLEEP seconds, prints "test output", exits
+#          sleeps $DOCKER_STUB_SLEEP seconds, prints "test output", exits
 #          $DOCKER_STUB_EXIT (default 0)
 #   kill   kills the sleeping run
 set -u

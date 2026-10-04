@@ -7,12 +7,13 @@
 #   run-tests.sh --run-dir <dir> [--slug <owner__repo__N>]
 #
 # PR code never runs on the host. The PR's tree goes into the container as a
-# tar stream on stdin (git archive), so nothing is mounted: no home
+# tar stream on stdin (git archive), so no host path is mounted: no home
 # directory, SSH keys, gh token, credentials or host environment. The
 # container runs with every capability dropped, no-new-privileges, pid,
 # memory and CPU limits, and a timeout (config "tests"). Network is on by
 # default because most builds download dependencies; set tests.network to
-# "none" to cut it.
+# "none" to cut it. tests.cacheVolumes (off by default) keeps a named
+# dependency-cache volume per repo, shared by that repo's PRs.
 #
 # Writes ctx/<slug>/tests.json for the reviewer:
 #   {status: passed|failed|timed out|not run, reason?, command?, exitCode?,
@@ -30,7 +31,7 @@ source "$SCRIPT_DIR/lib/repo.sh"
 source "$SCRIPT_DIR/lib/testplan.sh"
 
 usage() {
-  sed -n '4,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '4,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 64
 }
 
@@ -85,12 +86,18 @@ run_one() {
   log="$run_dir/tests/$slug.log"
   name="quill-test-$slug-$$"
   timeout="$(jq -r '.tests.timeoutSec // 900' "$cfg")"
-  local -a argv
+  local -a argv cache=()
+  if [ "$(jq -r '.tests.cacheVolumes // false' "$cfg")" = true ]; then
+    # Opt-in: a named volume per repo as HOME keeps downloaded dependencies
+    # between runs. It's a volume, not a host path, but every PR of the repo
+    # shares it, so one PR's build can poison the next one's cache.
+    cache=(--mount "type=volume,src=quill-cache-$(repo_slug "${repo%%/*}" "${repo#*/}"),dst=/tmp/home")
+  fi
   argv=("$rt" run --rm -i --name "$name"
     --network "$(jq -r '.tests.network // "bridge"' "$cfg")"
     --cap-drop ALL --security-opt no-new-privileges --pids-limit 4096
     --memory "$(jq -r '.tests.memory // "6g"' "$cfg")" --cpus "$(jq -r '.tests.cpus // 4' "$cfg")"
-    -e HOME=/tmp/home
+    -e HOME=/tmp/home ${cache[@]+"${cache[@]}"}
     "$(jq -r .image <<<"$plan")"
     sh -c "mkdir -p /tmp/src /tmp/home && tar -x -C /tmp/src && cd /tmp/src && $(jq -r .command <<<"$plan")")
 

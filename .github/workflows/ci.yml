@@ -38,7 +38,10 @@ jobs:
           ln -s /bin/bash "$RUNNER_TEMP/bash32/bash"
           echo "$RUNNER_TEMP/bash32" >> "$GITHUB_PATH"
       - name: Install bats
-        run: git clone --quiet --depth 1 --branch v1.13.0 https://github.com/bats-core/bats-core.git "$RUNNER_TEMP/bats"
+        run: |
+          git clone --quiet --depth 1 --branch v1.13.0 https://github.com/bats-core/bats-core.git "$RUNNER_TEMP/bats"
+          # Tags can move; fail if v1.13.0 no longer points at the reviewed commit.
+          test "$(git -C "$RUNNER_TEMP/bats" rev-parse HEAD)" = 3bca150ec86275d6d9d5a4fd7d48ab8b6c6f3d87
       - name: Versions
         run: |
           bash --version | head -1

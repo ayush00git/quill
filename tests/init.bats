@@ -127,3 +127,15 @@ JSON
   run ls -A "$QUILL_HOME/.claude"
   [ "$output" = "settings.json" ]
 }
+
+@test "init --new-run creates and prints a confined run directory" {
+  run "$INIT" --new-run
+  [ "$status" -eq 0 ]
+  local r
+  r="$(printf '%s\n' "$output" | tail -1)"
+  [[ "$r" == "$QUILL_HOME/reviews/"*"/.run/"* ]] || false
+  [ -d "$r" ]
+  [[ "$(basename "$r")" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$ ]] || false
+  run "$INIT" --bogus
+  [ "$status" -eq 64 ]
+}

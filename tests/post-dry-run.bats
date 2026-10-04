@@ -120,7 +120,8 @@ JSON
 @test "anything that looks like a credential or private notes is refused (exit 5)" {
   local body
   for body in "token ghp_abcdefghijklmnopqrstuvwxyz0123" "github_pat_11ABC" "AKIAABCDEFGHIJKLMNOP" \
-    "-----BEGIN OPENSSH PRIVATE KEY-----" "xoxb-1234-5678" "Expected answer: because" "contributor signals: weak"; do
+    "-----BEGIN OPENSSH PRIVATE KEY-----" "xoxb-1234-5678" "Expected answer: because" "contributor signals: weak" \
+    "refresh ghr_abcdefghijklmnopqrstuvwxyz0123" "key sk-ant-api03-abcdef"; do
     jq -n --arg b "$body" '[{path: "src/a.go", line: 3, side: "RIGHT", body: $b}]' >"$D/apache__foo__1.comments.json"
     rm -f "$QUILL_HOME/post/apache__foo__1.json"
     run "$SCRIPTS/post.sh" --dry-run apache/foo#1

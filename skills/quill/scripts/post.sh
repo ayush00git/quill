@@ -43,10 +43,11 @@ usage() {
   exit 64
 }
 
-# Text that must never reach GitHub: credentials (GitHub, AWS, Slack, private
-# keys) and quill's private notes. Patterns are anchored on fixed prefixes,
-# so they stay linear on long input.
-SECRET_RE='gh[opsu]_[A-Za-z0-9]|github_pat_|AKIA[0-9A-Z]{12}|-----BEGIN|xox[abprs]-'
+# Text that must never reach GitHub: credentials (GitHub tokens including
+# refresh tokens, AWS, Slack, Anthropic API keys, private keys) and quill's
+# private notes. Patterns are anchored on fixed prefixes, so they stay linear
+# on long input.
+SECRET_RE='gh[oprsu]_[A-Za-z0-9]|github_pat_|AKIA[0-9A-Z]{12}|-----BEGIN|xox[abprs]-|sk-ant-[A-Za-z0-9]'
 PRIVATE_RE='(?i)expected answer|contributor signals'
 
 # gh_json <out file> <gh api args...>: a GET whose failure stops the run with

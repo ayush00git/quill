@@ -122,12 +122,14 @@ result() { # result <jq filter over this PR's result>
              {"path": "src/a.go", "line": "2", "side": "RIGHT", "body": "x"},
              {"path": "src/a.go", "line": 2, "side": "MIDDLE", "body": "x"},
              {"path": "src/a.go", "line": 2, "side": "RIGHT", "body": "   "},
+             {"path": "src/a.go", "line": 3, "side": "RIGHT", "body": "question: why?\nexpected answer: because"},
+             {"path": "src/a.go", "line": 3, "side": "RIGHT", "body": "issue: x\nRead: likely understands it"},
              "not an object"]'
   write_report
   save
   [ "$status" -eq 0 ]
   [ "$(jq length "$QUILL_HOME/reviews/2026-10-04/apache__foo__1.comments.json")" = "0" ]
-  [ "$(result '.warnings | length')" = "8" ]
+  [ "$(result '.warnings | length')" = "10" ]
   [[ "$(result '.warnings | join("|")')" == *"private text"* ]] || false
 }
 

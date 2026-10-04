@@ -142,7 +142,8 @@ check_comments() {
         elif ([.side // "RIGHT"] | inside(["RIGHT", "LEFT"]) | not) then {drop: "side must be RIGHT or LEFT", c: .}
         elif (.line | type) != "number" or .line < 1 or .line != (.line | floor) then {drop: "line must be a positive integer", c: .}
         elif (.body | length) > 65000 then {drop: "body over GitHub'"'"'s comment size limit", c: .}
-        elif (.body | test("Expected answer|Contributor signals|^Read: (likely understands|unclear|low effort)")) then {drop: "private text (expected answers or signals) in the body", c: .}
+        # case-insensitive, and Read: at the start of any line (jq'"'"'s ^ only anchors the whole string)
+        elif (.body | test("expected answer|contributor signals|(^|\n)\\s*read: *(likely understands|unclear|low effort)"; "i")) then {drop: "private text (expected answers or signals) in the body", c: .}
         else
           ({path, line, side: (.side // "RIGHT"), body}
             + (if .start_line == null then {} else {start_line, start_side: (.start_side // .side // "RIGHT")} end)) as $c
@@ -297,13 +298,16 @@ main() {
 
   jq -s . "$results" >"$results.this"
   # Merge with earlier results for this run; a re-saved PR replaces its entry
-  # (group_by is stable, so the later one is last).
+  # (group_by is stable, so the later one is last). Saves for different PRs
+  # can run in parallel, so the read-merge-write happens under a lock.
+  lock_acquire "$run_dir/.results.lock" 30
   if [ -f "$run_dir/results.json" ]; then
     jq -s '(.[0] + .[1]) | group_by(.slug) | map(last)' "$run_dir/results.json" "$results.this" >"$results.merged"
   else
     cp "$results.this" "$results.merged"
   fi
   write_atomic "$run_dir/results.json" <"$results.merged"
+  lock_release "$run_dir/.results.lock"
 
   jq -r '.[] | if .status == "saved" then
       "saved \(.pr): \(.verdict) (\(.effort)), \(.comments) comment(s)"

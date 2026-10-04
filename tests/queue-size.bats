@@ -32,6 +32,16 @@ matches() { # matches <glob> <path> -> true|false
   [ "$(matches 'a+b.txt' aab.txt)" = false ]
 }
 
+@test "glob_regex: a trailing / means the directory at any depth, a leading / anchors to the root" {
+  [ "$(matches 'vendor/' vendor/a.go)" = true ]
+  [ "$(matches 'vendor/' src/vendor/b.go)" = true ]
+  [ "$(matches 'vendor/' vendorx/a.go)" = false ]
+  [ "$(matches 'docs/gen/' docs/gen/a.md)" = true ]
+  [ "$(matches 'docs/gen/' a/docs/gen/b.md)" = false ]
+  [ "$(matches '/build/**' build/x.c)" = true ]
+  [ "$(matches '/build/**' src/build/x.c)" = false ]
+}
+
 size_of() { # size_of <files json> [size override json]
   jq -nc -L "$LIB" --argjson cfg "$CFG" --argjson f "$1" --argjson s "${2:-null}" 'include "size";
     {size: ($s // {additions: ([$f[].additions] | add // 0), deletions: ([$f[].deletions] | add // 0), files: ($f | length)}),

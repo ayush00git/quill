@@ -125,6 +125,17 @@ JSON
   [ ! -f "$RUN/queue.json" ]
 }
 
+@test "a failed gh call with no JSON reports gh's own error" {
+  # an executable fixture that fails the way gh does on a 401: stderr only
+  printf '#!/bin/sh\necho "HTTP 401: Bad credentials" >&2\nexit 1\n' >"$GH_STUB_DIR/fail401"
+  chmod +x "$GH_STUB_DIR/fail401"
+  printf 'api graphql *\tfail401\t1\n' >>"$GH_STUB_DIR/routes"
+  run "$SCRIPTS/queue.sh" --run-dir "$RUN" --pr apache/foo#1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Bad credentials"* ]] || false
+  [ ! -f "$RUN/queue.json" ]
+}
+
 @test "responses far over the 128 KB argument limit work" {
   gh_respond_with 'api graphql *' fake-graphql-huge
   run "$SCRIPTS/queue.sh" --run-dir "$RUN" --pr apache/foo#1

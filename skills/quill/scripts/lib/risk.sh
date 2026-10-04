@@ -71,16 +71,19 @@ _risk_categories() {
 # _workflow_details <git dir> <from> <to> <path>: what's risky in the lines
 # the PR adds to one workflow or action file.
 _workflow_details() {
-  local gd="$1" from="$2" to="$3" path="$4" added
+  local gd="$1" from="$2" to="$3" path="$4" added whole
+  # Triggers count for the whole new file: editing a step of an existing
+  # pull_request_target workflow is the dangerous case, trigger line untouched.
+  whole="$(qgit_net --git-dir="$gd" show "$to:$path" 2>/dev/null || true)"
+  if printf '%s\n' "$whole" | grep -q 'pull_request_target'; then
+    echo "runs on pull_request_target (fork PRs get secrets and a write token)"
+  fi
+  if printf '%s\n' "$whole" | grep -q 'workflow_run'; then
+    echo "runs on workflow_run"
+  fi
   added="$(qgit_net --git-dir="$gd" diff --no-ext-diff --no-color -U0 "$from" "$to" -- "$path" |
     sed -n 's/^+//p' | grep -v '^++ ' || true)"
   [ -n "$added" ] || return 0
-  if printf '%s\n' "$added" | grep -q 'pull_request_target'; then
-    echo "adds or keeps a pull_request_target trigger"
-  fi
-  if printf '%s\n' "$added" | grep -q 'workflow_run'; then
-    echo "adds a workflow_run trigger"
-  fi
   printf '%s\n' "$added" |
     sed -n 's/^[[:space:]-]*uses:[[:space:]]*["'\'']\{0,1\}\([^"'\''[:space:]#]*\).*/\1/p' |
     while IFS= read -r use; do
@@ -102,8 +105,8 @@ _workflow_details() {
     echo "grants write permissions"
   fi
   # shellcheck disable=SC2016 # a literal ${{ ... }} expression, not a shell expansion
-  if printf '%s\n' "$added" | grep -q '\${{[[:space:]]*github\.event\.'; then
-    echo "interpolates \${{ github.event.* }} (check for script injection in run steps)"
+  if printf '%s\n' "$added" | grep -Eq '\$\{\{[[:space:]]*github\.(event\.|head_ref)'; then
+    echo "interpolates \${{ github.event.* }} or github.head_ref (check for script injection in run steps)"
   fi
   return 0
 }
@@ -136,6 +139,11 @@ risk_flags() {
         fi
       } >>"$out"
     done
+  # A failed diff would otherwise look like "nothing risky".
+  if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+    rm -f "$out"
+    return 1
+  fi
   if ! jq -s '{flags: .}' "$out"; then
     rm -f "$out"
     return 1

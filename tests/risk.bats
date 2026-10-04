@@ -31,6 +31,7 @@ make_risky_remote() {
   mkdir -p "$src/.github/workflows" "$src/src"
   git init -q "$src"
   printf 'on: push\n' >"$src/.github/workflows/old.yml"
+  printf 'on:\n  pull_request_target:\njobs:\n  a:\n    steps:\n      - run: make\n' >"$src/.github/workflows/prt.yml"
   printf 'package a\n' >"$src/src/a.go"
   git -C "$src" add -A
   git -C "$src" commit -q -m base
@@ -53,6 +54,8 @@ jobs:
           TOKEN: \${{ secrets.NPM_TOKEN }}
 YAML
   git -C "$src" rm -q .github/workflows/old.yml
+  # edits a step of an existing pull_request_target workflow, trigger untouched
+  printf '      - run: echo "${{ github.head_ref }}"\n' >>"$src/.github/workflows/prt.yml"
   mkdir -p "$src/.claude" "$src/docs" "$src/lib" "$src/.mvn/wrapper"
   printf '<project/>\n' >"$src/pom.xml"
   printf '{}\n' >"$src/package-lock.json"
@@ -115,6 +118,17 @@ flags() { # flags <jq filter over .flags[]>
   [[ "$d" != *"actions/checkout"* ]] || false
   [[ "$d" != *"other/pinned"* ]] || false
   [[ "$d" != *"local-action"* ]] || false
+}
+
+@test "editing an existing pull_request_target workflow is flagged, and head_ref interpolation too" {
+  run flags 'select(.path == ".github/workflows/prt.yml") | .details[]'
+  [[ "$output" == *"runs on pull_request_target"* ]] || false
+  [[ "$output" == *"head_ref"* ]] || false
+}
+
+@test "a failed diff fails risk_flags instead of reporting nothing" {
+  run risk_flags "$GD" "$MB" "0000000000000000000000000000000000000000"
+  [ "$status" -ne 0 ]
 }
 
 @test "a deleted workflow is flagged without details" {

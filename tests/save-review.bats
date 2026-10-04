@@ -265,3 +265,25 @@ result() { # result <jq filter over this PR's result>
   run "$SCRIPTS/save-review.sh" --run-dir "$TEST_TMP/nowhere" --all
   [ "$status" -ne 0 ]
 }
+
+@test "a rejected report is moved aside, so a retried reviewer's report can be captured and saved" {
+  local bad good
+  bad="$(jq -c '.verdict = "approve"' <<<"$SUMMARY")" # disagrees with the review's verdict line
+  good="$SUMMARY"
+  SUMMARY="$bad"
+  write_report
+  save
+  [[ "$output" == "rejected apache/foo#1: "* ]] || false
+  [ ! -e "$CTX/output.raw" ]
+  [ -s "$CTX/output.rejected.raw" ]
+  # the retried reviewer's report goes through capture.sh, which keeps only the first one
+  SUMMARY="$good"
+  write_report
+  mv "$CTX/output.raw" "$TEST_TMP/retry.txt"
+  jq -cn --rawfile m "$TEST_TMP/retry.txt" '{hook_event_name: "SubagentStop", agent_type: "quill:pr-reviewer",
+    agent_id: "retry1", last_assistant_message: $m}' >"$TEST_TMP/stop.json"
+  run "$REPO_ROOT/hooks/capture.sh" <"$TEST_TMP/stop.json"
+  [ -s "$CTX/output.raw" ]
+  save
+  [ "$output" = "saved apache/foo#1: request_changes (M), 1 comment(s)" ]
+}

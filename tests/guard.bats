@@ -536,3 +536,44 @@ read_as() { # read_as <path>
     }
   done
 }
+
+# --- pattern values aren't paths ---
+
+@test "reviewer Bash: pattern values may look like paths (grep -e, log/show/diff -G -S, --grep/--author/--committer)" {
+  local c
+  for c in \
+    "git -C $WT grep -n -I -e '/api/' -- src" \
+    "git -C $WT grep -e/api/" \
+    "git -C $WT grep -e '..'" \
+    "git -C $WT log -G '/etc/x' --oneline" \
+    "git -C $WT log -G/etc/x" \
+    "git -C $WT log -S '~/notes'" \
+    "git -C $WT show -S/x HEAD" \
+    "git -C $WT log --grep '/tmp/fix'" \
+    "git -C $WT log --grep=/tmp/fix" \
+    "git -C $WT log --author=/bot/" \
+    "git -C $WT log --committer '~bot'" \
+    "git -C $WT diff -G '/x' a b"; do
+    reviewer Bash "$(bash_input "$c")"
+    expect_allow || {
+      echo "command: $c"
+      return 1
+    }
+  done
+}
+
+@test "reviewer Bash: only the one pattern value is exempt, and only from the path rules" {
+  assert_bash_denied \
+    "git -C $WT grep -e x -- /etc/passwd" \
+    "git -C $WT grep -e -- /etc/passwd" \
+    "git -C $WT grep -e x ../../outside/id_rsa" \
+    "git -C $WT log -G x /etc/passwd" \
+    "git -C $WT log --grep x ~/secret" \
+    "git -C $WT blame -S /etc/revs src/a.go" \
+    "git -C $WT grep -G /etc" \
+    "git -C $WT log -e /etc/passwd" \
+    "git -C $WT diff --grep=/etc/x" \
+    "git -C $WT grep -e --output=pwned" \
+    "git -C $WT log -G --no-index" \
+    "git -C $WT grep -e"
+}

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake `gh api graphql` for clean.sh's PR state query: answers each
+# `pN: repository(...) { pullRequest(number: K) { state } }` alias from
+# $FAKE_STATES ("1:OPEN,2:MERGED,..."); numbers not listed get no PR (null).
+set -euo pipefail
+query=""
+for a in "$@"; do
+  case "$a" in query=*) query="${a#query=}" ;; esac
+done
+printf '%s\n' "$query" |
+  sed -n 's/^\(p[0-9]*\): repository(owner: "[^"]*", name: "[^"]*") { pullRequest(number: \([0-9]*\)).*/\1 \2/p' |
+  jq -R -s --arg states "${FAKE_STATES:-}" '
+    ($states | split(",") | map(select(length > 0) | split(":") | {key: .[0], value: .[1]}) | from_entries) as $s
+    | {data: (split("\n") | map(select(length > 0) | split(" "))
+        | map({key: .[0], value: (if $s[.[1]] then {pullRequest: {state: $s[.[1]]}} else null end)})
+        | from_entries)}'

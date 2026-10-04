@@ -55,12 +55,16 @@ submit() {
 
 posts() { grep -c '^api --method POST' "$GH_STUB_LOG" || true; }
 
+sha256_of() { (sha256sum "$1" 2>/dev/null || shasum -a 256 "$1") | cut -d' ' -f1; }
+
 @test "submit creates the pending review once and records it" {
   submit
   [ "$status" -eq 0 ]
   [[ "$output" == *"Created a pending review on apache/foo#1 with 1 inline comment(s). Only you can see it until you submit it on GitHub: https://github.com/apache/foo/pull/1#pullrequestreview-77"* ]] || false
   [ "$(posts)" = "1" ]
-  grep -q "^api --method POST repos/apache/foo/pulls/1/reviews --input $QUILL_HOME/post/apache__foo__1.json" "$GH_STUB_LOG"
+  # the request body is a private copy of the payload whose sha256 was confirmed
+  grep -q "^api --method POST repos/apache/foo/pulls/1/reviews --input " "$GH_STUB_LOG"
+  [ "$(sha256_of "$QUILL_HOME/post/apache__foo__1.posted.json")" = "$SHA" ]
   run jq -c '.prs["apache/foo#1"].posted | {reviewId, state, comments, commitId}' "$QUILL_HOME/state.json"
   [ "$output" = "{\"reviewId\":77,\"state\":\"PENDING\",\"comments\":1,\"commitId\":\"$HEAD_SHA\"}" ]
   [ -f "$QUILL_HOME/post/apache__foo__1.posted.json" ]

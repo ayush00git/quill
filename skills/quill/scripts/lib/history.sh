@@ -17,13 +17,15 @@
 
 QUILL_HISTORY_BATCH="${QUILL_HISTORY_BATCH:-10}"
 
+# The rule for splicing a {repo, login} pair into a query (jq).
+HISTORY_VALID_JQ='def valid: (.repo | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$"))
+  and ((.repo | split("/")[1]) as $n | $n != "." and $n != "..")
+  and (.login | type == "string" and test("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"));'
+
 # _history_query < pairs: the GraphQL document for a batch of
 # [{repo, login}]. Both are validated before they are spliced in.
 _history_query() {
-  jq -r '
-    def valid: (.repo | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$"))
-      and ((.repo | split("/")[1]) as $n | $n != "." and $n != "..")
-      and (.login | type == "string" and test("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"));
+  jq -r "$HISTORY_VALID_JQ"'
     if all(.[]; valid) | not then error("invalid repo or login in batch") else . end
     | "query {\n"
       + (to_entries | map(
@@ -42,7 +44,13 @@ add_author_history() {
   local queue="$1" tmp total i=0 n=0 query
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/quill-history.XXXXXX")" || return 1
   jq -c '[.items[] | select(.court == "mine" or .court == "waiting_on_author")
-          | select(.author.isBot | not) | {repo, login: .author.login}] | unique' "$queue" >"$tmp/pairs.json"
+          | select(.author.isBot | not) | {repo, login: .author.login}] | unique' "$queue" >"$tmp/all.json"
+  # Drop pairs that can't be spliced safely one by one, so one odd login
+  # doesn't cost the rest of its batch their history.
+  jq -c "$HISTORY_VALID_JQ"' [.[] | select(valid)]' "$tmp/all.json" >"$tmp/pairs.json"
+  local skipped
+  skipped="$(jq -r "$HISTORY_VALID_JQ"' [.[] | select(valid | not) | "\(.repo) @\(.login)"] | join(", ")' "$tmp/all.json")"
+  [ -z "$skipped" ] || warn "no author history for $skipped (unexpected repo or login)"
   total="$(jq length "$tmp/pairs.json")"
   : >"$tmp/results.jsonl"
   while [ "$i" -lt "$total" ]; do

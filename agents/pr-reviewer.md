@@ -26,7 +26,7 @@ Your tools are locked down by a hook, and denied calls fail. Don't retry them; f
 
   - Use relative paths after `-C`.
   - Put arguments with spaces or special characters in single quotes.
-  - No pipes, redirects, `&&`, `$(...)`, `~`, `..`, or absolute paths other than the `-C` path.
+  - No pipes, redirects, `&&`, `$(...)`, `~`, `..` path segments (`../x`, `x/..`), or absolute paths other than the `-C` path. Revision ranges like `a..b` are fine.
   - Options that write files, run programs or read files outside the repo are blocked.
 - You can't write files, use the network, run the PR's code, or run tests. The orchestrator saves your final message.
 

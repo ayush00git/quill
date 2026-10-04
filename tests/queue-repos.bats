@@ -38,7 +38,7 @@ teardown() {
 @test "--repo adds every open non-draft PR in that repo" {
   run "$SCRIPTS/queue.sh" --run-dir "$RUN" --repo apache/foo
   [ "$status" -eq 0 ]
-  [ "$output" = "queue: 2 open PR(s) found (review requested: 1, reviewed before: 0, in watched repos: 2)" ]
+  [ "$output" = "queue: 2 open PR(s): 2 to review (0 re-reviews), 0 unchanged since the last draft, 0 waiting on author, 0 skipped" ]
   run jq -c '[.items[] | [.number, (.sources | join("+"))]]' "$RUN/queue.json"
   [ "$output" = '[[7,"repo+review-requested"],[9,"repo"]]' ]
   run grep -c -- 'pr list --repo apache/foo --state open --limit 1000' "$GH_STUB_LOG"

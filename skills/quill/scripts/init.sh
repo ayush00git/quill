@@ -11,7 +11,9 @@
 #                             reviews/, plus an explicit ask rule for
 #                             `post.sh --submit` (the human gate on posting)
 #
-# Prints the workspace path on stdout.
+# Prints the workspace path on stdout. With --new-run it also creates a run
+# directory, reviews/<YYYY-MM-DD>/.run/<YYYYMMDDTHHMMSSZ>-<random>, and
+# prints that instead, for the other scripts' --run-dir.
 set -euo pipefail
 
 # shellcheck source=lib/common.sh
@@ -22,6 +24,12 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 POST_ASK_RULE='Bash(*post.sh*--submit*)'
 
 main() {
+  local new_run=false
+  case "${1:-}" in
+    --new-run) new_run=true ;;
+    "") ;;
+    *) die "unknown argument: $1 (use --new-run or nothing)" 64 ;;
+  esac
   require_cmd jq
   local home
   home="$(quill_home)"
@@ -45,7 +53,13 @@ main() {
   fi
 
   merge_settings "$home" "$real"
-  printf '%s\n' "$home"
+  if [ "$new_run" = true ]; then
+    local id
+    id="$(date -u +%Y%m%dT%H%M%SZ)-$(od -An -tx1 -N3 /dev/urandom | tr -d ' \n')"
+    require_run_dir "$home/reviews/$(today)/.run/$id"
+  else
+    printf '%s\n' "$home"
+  fi
 }
 
 # The workspace path goes into glob patterns (claudeMdExcludes), so it can't

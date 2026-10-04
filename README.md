@@ -120,6 +120,106 @@ With `--run-tests`, each PR's affected tests run in a throwaway container:
 | `tests.cacheVolumes` | `false` | keep a dependency-cache volume per repo; a repo's PRs share it, so one PR's build can poison the next one's cache |
 | `tests.repos` | `{}` | `{"owner/repo": {"image": "...", "command": "..."}}`; `{modules}` in the command becomes the affected modules |
 
+## Scheduled runs
+
+quill can build the queue unattended, so the reviews are waiting when you sit down. A headless run reviews and writes QUEUE.md like an interactive one, but **never posts**: `post.sh` refuses when `QUILL_HEADLESS` is set, and the posting rule can't be answered without a person.
+
+```bash
+cd ~/quill && env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
+  claude -p "/quill:quill" --permission-mode dontAsk --permission-prompts none --output-format json
+```
+
+| Part | Why |
+|---|---|
+| `cd ~/quill` | the workspace settings only apply to sessions started there |
+| `env -u ANTHROPIC_API_KEY` | uses your Claude Code login, not an API key that happens to be in the environment |
+| `QUILL_HEADLESS=1` | makes posting refuse outright |
+| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | runs reviewers in the foreground, so the run waits for them before exiting |
+| `--permission-mode dontAsk --permission-prompts none` | anything not already allowed is denied instead of waiting for an answer that never comes |
+| `--output-format json` | a machine-readable result for your logs |
+
+Run it once by hand first. That confirms Claude Code and `gh` are logged in and usable from a non-interactive shell. A scheduler starts with a minimal environment, so the examples below go through a login shell (`bash -lc`) to get your usual `PATH`. On macOS, where the default shell is zsh, use `/bin/zsh -lc` if your `PATH` is set in `~/.zprofile`. If `claude`, `gh` or `jq` still isn't found, put their full paths in the command. If you moved the workspace, add `QUILL_HOME=<path>` next to `QUILL_HEADLESS=1` and `cd` there instead.
+
+Add `--run-tests` after `/quill:quill` (inside the quotes) to run tests too.
+
+### cron (Linux, macOS)
+
+`crontab -e`, then for 07:00 on weekdays:
+
+```cron
+0 7 * * 1-5 /bin/bash -lc 'cd ~/quill && env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/quill:quill" --permission-mode dontAsk --permission-prompts none --output-format json >>~/quill/logs/headless.log 2>&1'
+```
+
+### launchd (macOS)
+
+`~/Library/LaunchAgents/dev.quill.review.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.quill.review</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd ~/quill &amp;&amp; env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/quill:quill" --permission-mode dontAsk --permission-prompts none --output-format json &gt;&gt;~/quill/logs/headless.log 2&gt;&amp;1</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+</dict>
+</plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.quill.review.plist
+```
+
+If the Mac is asleep at 07:00, launchd runs the job when it wakes. If it's off, the run is skipped.
+
+### systemd (Linux)
+
+`~/.config/systemd/user/quill.service`:
+
+```ini
+[Unit]
+Description=quill review queue
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -lc 'cd ~/quill && env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/quill:quill" --permission-mode dontAsk --permission-prompts none --output-format json >>~/quill/logs/headless.log 2>&1'
+```
+
+`~/.config/systemd/user/quill.timer`:
+
+```ini
+[Unit]
+Description=quill review queue, weekday mornings
+
+[Timer]
+OnCalendar=Mon..Fri 07:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now quill.timer
+loginctl enable-linger "$USER"   # only if it should run while you're logged out
+```
+
+With `Persistent=true`, a run missed while the timer was inactive happens as soon as it starts again: at login, or at boot with lingering.
+
 ## Security model
 
 A pull request is untrusted input, and quill hands it to an AI agent. The design assumes a PR will try to steer that agent.

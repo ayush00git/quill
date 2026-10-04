@@ -9,7 +9,8 @@
 #   {version: 1, generatedAt, viewer, items: [...]}
 # where each item has {repo, number, url, sources} plus the PR details from
 # lib/normalize.jq (title, author, base/head, size, files, CI, reviews, ...)
-# and the ball-in-court verdict from lib/classify.jq (court, needsReview, ...).
+# the ball-in-court verdict from lib/classify.jq (court, needsReview, ...) and
+# the effective size from lib/size.jq (effectiveSize, sizeClass).
 # --force marks every PR in my court for review even if quill already drafted
 # a review for its current head.
 # and prints a one-line summary. Repos come from --repo (repeatable) plus
@@ -85,8 +86,9 @@ main() {
   jq -L "$QUILL_LIB_DIR" --arg at "$(now_iso)" --arg viewer "$viewer" --argjson force "$force" \
     --slurpfile cfg "$run_dir/config.effective.json" --slurpfile state "$state_file" '
     include "classify";
+    include "size";
     {version: 1, generatedAt: $at, viewer: $viewer,
-     items: map(classify($viewer; $cfg[0]; $state[0]; $force))}' "$run_dir/enriched.json" |
+     items: map(classify($viewer; $cfg[0]; $state[0]; $force) | effective_size($cfg[0]))}' "$run_dir/enriched.json" |
     write_atomic "$run_dir/queue.json"
   rm -f "$run_dir/candidates.json" "$run_dir/enriched.json" "$run_dir/config.effective.json"
 

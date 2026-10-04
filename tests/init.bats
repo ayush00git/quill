@@ -37,7 +37,7 @@ settings() { cat "$QUILL_HOME/.claude/settings.json"; }
     '.claudeMdExcludes == [$h + "/repos/**", $h + "/worktrees/**", $h + "/reviews/**"]' \
     "$QUILL_HOME/.claude/settings.json"
   [ "$status" -eq 0 ]
-  run jq -e '.permissions.ask == ["Bash(*post.sh --submit*)"]' "$QUILL_HOME/.claude/settings.json"
+  run jq -e '.permissions.ask == ["Bash(*post.sh*--submit*)"]' "$QUILL_HOME/.claude/settings.json"
   [ "$status" -eq 0 ]
 }
 
@@ -50,7 +50,7 @@ settings() { cat "$QUILL_HOME/.claude/settings.json"; }
   run "$INIT"
   [ "$status" -eq 0 ]
   [ "$(settings)" = "$before" ]
-  [[ "$output" != *"updated"* ]]
+  [[ "$output" != *"updated"* ]] || false
   # existing config and state are never overwritten
   run jq -e '.repos == ["apache/foo"]' "$QUILL_HOME/config.json"
   [ "$status" -eq 0 ]
@@ -71,7 +71,7 @@ JSON
     .env.FOO == "1"
     and .permissions.allow == ["Read"]
     and .permissions.deny == ["WebFetch"]
-    and .permissions.ask == ["Bash(git push *)", "Bash(*post.sh --submit*)"]
+    and .permissions.ask == ["Bash(git push *)", "Bash(*post.sh*--submit*)"]
     and .claudeMdExcludes == ["/elsewhere/**", $h + "/repos/**", $h + "/worktrees/**", $h + "/reviews/**"]
   ' "$QUILL_HOME/.claude/settings.json"
   [ "$status" -eq 0 ]
@@ -82,7 +82,7 @@ JSON
   printf '{"permissions": ' >"$QUILL_HOME/.claude/settings.json"
   run "$INIT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"won't touch"* ]]
+  [[ "$output" == *"won't touch"* ]] || false
   [ "$(cat "$QUILL_HOME/.claude/settings.json")" = '{"permissions": ' ]
 }
 
@@ -90,7 +90,22 @@ JSON
   export QUILL_HOME="$TEST_TMP/ws[1]"
   run "$INIT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"glob characters"* ]]
+  [[ "$output" == *"glob characters"* ]] || false
+  [ ! -e "$QUILL_HOME" ]
+}
+
+@test "init excludes both paths when the workspace is a symlink" {
+  mkdir -p "$TEST_TMP/real-ws"
+  ln -s "$TEST_TMP/real-ws" "$TEST_TMP/ws"
+  run "$INIT"
+  [ "$status" -eq 0 ]
+  local real
+  real="$(cd -P "$TEST_TMP/real-ws" && pwd -P)"
+  run jq -e --arg h "$QUILL_HOME" --arg r "$real" '
+    .claudeMdExcludes == [$h + "/repos/**", $h + "/worktrees/**", $h + "/reviews/**",
+                          $r + "/repos/**", $r + "/worktrees/**", $r + "/reviews/**"]
+  ' "$QUILL_HOME/.claude/settings.json"
+  [ "$status" -eq 0 ]
 }
 
 @test "init never creates instruction files Claude Code would auto-load" {

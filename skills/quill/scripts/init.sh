@@ -17,19 +17,20 @@ set -euo pipefail
 # shellcheck source=lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
-POST_ASK_RULE='Bash(*post.sh --submit*)'
+# Matches any post.sh call with --submit anywhere after it, so a quoted path
+# or reordered arguments can't skip the prompt.
+POST_ASK_RULE='Bash(*post.sh*--submit*)'
 
 main() {
   require_cmd jq
   local home
   home="$(quill_home)"
-  case "$home" in
-    *'*'* | *'?'* | *'['* | *']'*)
-      die "QUILL_HOME can't contain glob characters (* ? [ ]): $home"
-      ;;
-  esac
-
+  reject_glob_chars "$home"
   mkdir -p "$home"
+  local real
+  real="$(resolve_path "$home")" || die "can't resolve the workspace path: $home"
+  reject_glob_chars "$real"
+
   local d
   for d in notes references repos worktrees logs reviews; do
     mkdir -p "$home/$d"
@@ -43,14 +44,25 @@ main() {
     printf '%s\n' '{"version": 1, "prs": {}}' | write_atomic "$home/state.json"
   fi
 
-  merge_settings "$home"
+  merge_settings "$home" "$real"
   printf '%s\n' "$home"
 }
 
-# merge_settings <home>: add the keys quill needs to the workspace's
-# .claude/settings.json, keeping everything already there.
+# The workspace path goes into glob patterns (claudeMdExcludes), so it can't
+# contain glob characters itself.
+reject_glob_chars() {
+  case "$1" in
+    *'*'* | *'?'* | *'['* | *']'*)
+      die "QUILL_HOME can't contain glob characters (* ? [ ]): $1"
+      ;;
+  esac
+}
+
+# merge_settings <home> <resolved home>: add the keys quill needs to the
+# workspace's .claude/settings.json, keeping everything already there. When
+# the workspace is reached through a symlink, the excludes cover both paths.
 merge_settings() {
-  local home="$1" settings current merged
+  local home="$1" real="$2" settings current merged
   settings="$home/.claude/settings.json"
   mkdir -p "$home/.claude"
   if [ -f "$settings" ]; then
@@ -63,7 +75,8 @@ merge_settings() {
 
   merged="$(printf '%s' "$current" | jq \
     --arg ask "$POST_ASK_RULE" \
-    --argjson excludes "$(jq -n --arg h "$home" '[$h + "/repos/**", $h + "/worktrees/**", $h + "/reviews/**"]')" '
+    --argjson excludes "$(jq -n --arg h "$home" --arg r "$real" \
+      'if $h == $r then [$h] else [$h, $r] end | map(. + "/repos/**", . + "/worktrees/**", . + "/reviews/**")')" '
     def add_missing($xs): reduce $xs[] as $x (. // []; if index([$x]) then . else . + [$x] end);
     .claudeMdExcludes |= add_missing($excludes)
     | .permissions = (.permissions // {})

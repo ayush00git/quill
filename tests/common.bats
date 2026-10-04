@@ -34,7 +34,7 @@ teardown() {
 @test "quill_home rejects a relative QUILL_HOME" {
   QUILL_HOME="quill" run quill_home
   [ "$status" -ne 0 ]
-  [[ "$output" == *"must be an absolute path"* ]]
+  [[ "$output" == *"must be an absolute path"* ]] || false
 }
 
 # --- config ---
@@ -61,7 +61,7 @@ teardown() {
   printf '{"parallel": ' >"$HOME/quill/config.json"
   run config_json
   [ "$status" -ne 0 ]
-  [[ "$output" == *"not a valid JSON object"* ]]
+  [[ "$output" == *"not a valid JSON object"* ]] || false
 }
 
 @test "config_json rejects a non-object config" {
@@ -117,8 +117,8 @@ teardown() {
 }
 
 @test "now_iso is UTC ISO-8601 and today is YYYY-MM-DD" {
-  [[ "$(now_iso)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
-  [[ "$(today)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+  [[ "$(now_iso)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || false
+  [[ "$(today)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || false
 }
 
 # --- files ---
@@ -156,7 +156,7 @@ teardown() {
   lock_acquire "$TEST_TMP/lock" 1
   run lock_acquire "$TEST_TMP/lock" 1
   [ "$status" -ne 0 ]
-  [[ "$output" == *"timed out"* ]]
+  [[ "$output" == *"timed out"* ]] || false
   lock_release "$TEST_TMP/lock"
   lock_acquire "$TEST_TMP/lock" 1
   lock_release "$TEST_TMP/lock"
@@ -168,7 +168,7 @@ teardown() {
 @test "require_cmd names every missing command" {
   run require_cmd git definitely-not-a-cmd-1 definitely-not-a-cmd-2
   [ "$status" -ne 0 ]
-  [[ "$output" == *"definitely-not-a-cmd-1 definitely-not-a-cmd-2"* ]]
+  [[ "$output" == *"definitely-not-a-cmd-1 definitely-not-a-cmd-2"* ]] || false
   run require_cmd git jq
   [ "$status" -eq 0 ]
 }

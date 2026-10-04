@@ -196,6 +196,36 @@ each() { # each <expect fn> <cwd> <command>...
     "git -C $QUILL_HOME/worktrees/apache__foo__1/sub log"
 }
 
+@test "workspace: reviewer-found bypasses are closed" {
+  # gh auth status --show-token prints the token, like gh auth token
+  each expect_deny "$CWD_IN" \
+    "gh auth status --show-token" \
+    "gh auth status -t" \
+    "gh auth status -ht"
+  # an alias via -c can push; other push commands
+  each expect_deny "$CWD_IN" \
+    "git -c alias.p=push p origin main" \
+    "git --config-env=alias.p=X p" \
+    "git send-pack origin main" \
+    "git subtree push --prefix x origin main"
+  # list literals in other interpreters, and command names from variables
+  each expect_deny "$CWD_IN" \
+    "perl -e 'system(\"gh\",\"api\",\"-X\",\"POST\",\"x\")'" \
+    "python3 -c \"import subprocess; subprocess.run(['gh','api','-X','POST','x'])\"" \
+    "G=gh; \$G api -X POST x" \
+    "G=g; H=h; \$G\$H api x"
+  # a renamed copy of post.sh, and --sub built from a variable
+  each expect_ask "$CWD_IN" \
+    "/tmp/renamed.sh --submit 12" \
+    "/tmp/renamed.sh --sub\$X 12" \
+    "/x/post.sh --sub\$X 12"
+  each expect_pass "$CWD_IN" \
+    "gh auth status" \
+    "gh api repos/{owner}/{repo}/pulls --jq .[].number" \
+    "gh pr list --json number,title" \
+    "echo \$HOME"
+}
+
 @test "outside the workspace, gh and git are none of quill's business" {
   each expect_pass "$CWD_OUT" \
     "gh pr merge 1" \

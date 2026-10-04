@@ -365,14 +365,20 @@ norm_command() {
   printf '%s' "$c"
 }
 
-# check_post_gate <normalized command>: ask before anything that may run
-# post.sh --submit.
+# check_post_gate <normalized command> [in workspace]: ask before anything
+# that may run post.sh --submit. Inside the workspace any --submit asks (a
+# renamed copy of post.sh), and so does --sub next to a variable.
 check_post_gate() {
-  local n="$1" post=0 submit=0 dynamic=0
+  local n="$1" in_ws="${2:-0}" post=0 submit=0 dynamic=0
   case "$n" in *post.sh*) post=1 ;; esac
   case "$n" in *--submit*) submit=1 ;; esac
   # shellcheck disable=SC2016 # literal $( and ${ in the command text
   case "$n" in *'$('* | *'${'* | *'`'* | *eval*) dynamic=1 ;; esac
+  if [ "$in_ws" = 1 ]; then
+    case "$n" in *'$'*) dynamic=1 ;; esac
+    case "$n" in *--sub*) [ "$dynamic" = 0 ] || submit=1 ;; esac
+    [ "$submit" = 0 ] || post=1
+  fi
   if [ "$post$submit" = 11 ] || [ "$post$dynamic" = 11 ] || [ "$submit$dynamic" = 11 ]; then
     ask "this creates a pending review on GitHub. Check the exact comments quill showed you before approving."
   fi
@@ -385,7 +391,17 @@ upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
 check_gh() {
   local a1="${1:-}" a2="${2:-}" w next method
   case "$a1" in
-    auth) [ "$a2" = status ] || deny "gh auth $a2 isn't allowed in the quill workspace (only gh auth status)" ;;
+    auth)
+      [ "$a2" = status ] || deny "gh auth $a2 isn't allowed in the quill workspace (only gh auth status)"
+      # --show-token prints the token, which is as good as gh auth token
+      for w in "$@"; do
+        case "$w" in
+          --show-token | --show-token=*) deny "gh auth status $w would print the token" ;;
+          --*) ;;
+          -*t*) deny "gh auth status $w would print the token" ;;
+        esac
+      done
+      ;;
     search) ;;
     pr)
       case "$a2" in
@@ -421,7 +437,7 @@ check_gh() {
 
 # check_git <args...>: no push; git -C under worktrees/ only at a worktree root.
 check_git() {
-  local dir r
+  local dir r w
   while [ "$#" -gt 0 ]; do
     case "$1" in
       -C)
@@ -436,9 +452,15 @@ check_git() {
         esac
         shift 2 || break
         ;;
-      -c | --git-dir | --work-tree | --namespace | --exec-path | --super-prefix | --config-env) shift 2 || break ;;
+      -c | -c* | --config-env | --config-env=*) deny "git $1 isn't allowed in the quill workspace (a config alias could push)" ;;
+      --git-dir | --work-tree | --namespace | --exec-path | --super-prefix) shift 2 || break ;;
       -*) shift ;;
-      push) deny "git push isn't allowed in the quill workspace" ;;
+      push | send-pack | http-push) deny "git $1 isn't allowed in the quill workspace" ;;
+      subtree)
+        shift
+        for w in "$@"; do [ "$w" != push ] || deny "git subtree push isn't allowed in the quill workspace"; done
+        break
+        ;;
       *) break ;;
     esac
   done
@@ -454,7 +476,8 @@ check_workspace_command() {
   # "nothing to check". Every separator becomes a newline; the tr sets have
   # equal length on purpose (BSD tr doesn't pad a shorter second set).
   # shellcheck disable=SC2020
-  segs="$(printf '%s\n' "$1" | tr ';&|(){}`<>' '\n\n\n\n\n\n\n\n\n\n')" ||
+  # , [ ] split list literals like system("gh","api") or run(['gh','api']).
+  segs="$(printf '%s\n' "$1" | tr ';&|(){}`<>,\133\135' '\n\n\n\n\n\n\n\n\n\n\n\n\n')" ||
     deny "couldn't parse the command"
   while IFS= read -r seg; do
     read -r -a W <<<"$seg" || true
@@ -471,6 +494,9 @@ check_workspace_command() {
       esac
     done
     [ "$i" -lt "$n" ] || continue
+    case "${W[$i]}" in
+      *'$'*) deny "the command name can't come from a variable in the quill workspace: ${W[$i]}" ;;
+    esac
     first="$(basename -- "${W[$i]}")"
     case "$first" in
       gh) check_gh "${W[@]:$((i + 1))}" ;;
@@ -490,21 +516,23 @@ check_workspace_command() {
 }
 
 session_branch() {
-  local raw="$1" cmd norm home
+  local raw="$1" cmd norm home in_ws=0
   if ! cmd="$(jq -r '.tool_input.command // ""' <<<"$raw")"; then
     # Can't read the command: if it might be the post, ask rather than pass.
     case "$raw" in *post.sh* | *--submit*) ask "couldn't parse this command; it may post to GitHub" ;; esac
     exit 0
   fi
   norm="$(norm_command "$cmd")"
+  # shellcheck disable=SC2016 # a literal $ in the command text
   case "$norm" in
-    *gh* | *git*)
+    *gh* | *git* | *'$'* | *--sub*)
       # shellcheck source=../skills/quill/scripts/lib/common.sh
       source "$GUARD_DIR/../skills/quill/scripts/lib/common.sh" || exit 0
       home="$(quill_home 2>/dev/null)" || home=""
       CWD="$(jq -r '.cwd // ""' <<<"$raw")" || CWD=""
       [ -n "$CWD" ] || CWD="$PWD"
       if [ -n "$home" ] && [ -d "$home" ] && path_within "$CWD" "$home"; then
+        in_ws=1
         # Inside the workspace a failure in these checks denies.
         trap guard_exit EXIT
         trap 'deny "internal error"' ERR
@@ -515,7 +543,7 @@ session_branch() {
       fi
       ;;
   esac
-  check_post_gate "$norm"
+  check_post_gate "$norm" "$in_ws"
   exit 0
 }
 

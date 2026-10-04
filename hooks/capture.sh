@@ -103,7 +103,9 @@ main() {
   bound=""
   if [ -n "$agent_id" ] && [ -f "$home/.agents/$agent_id" ]; then
     bound="$(head -1 "$home/.agents/$agent_id")"
-    if [ "$bound" != "$ctx" ]; then
+    # The guard records the resolved path; compare resolved to resolved, or a
+    # symlinked workspace would reject every legitimate report.
+    if [ "$(resolve_path "$bound" 2>/dev/null)" != "$(resolve_path "$ctx" 2>/dev/null)" ]; then
       clog "$home/logs" "event=$event agent=$agent_id nonce=$nonce rejected: agent is bound to $bound"
       return 0
     fi

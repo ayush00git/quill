@@ -149,6 +149,8 @@ queue_with() {
   local c="$RUN/ctx/apache__foo__1"
   [ "$(cat "$c/notes.md")" = "Always check the RAT header." ]
   grep -q 'src/a.go' "$c/diffstat.txt"
+  run jq -c . "$c/risk.json"
+  [ "$output" = '{"flags":[]}' ]
   [ "$(cat "$c/prev/review.md")" = "# old review" ]
   [ -f "$c/prev/comments.json" ]
 }

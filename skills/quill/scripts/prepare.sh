@@ -21,6 +21,8 @@ source "$SCRIPT_DIR/lib/repo.sh"
 source "$SCRIPT_DIR/lib/worktree.sh"
 # shellcheck source=lib/mode.sh
 source "$SCRIPT_DIR/lib/mode.sh"
+# shellcheck source=lib/risk.sh
+source "$SCRIPT_DIR/lib/risk.sh"
 # shellcheck source=lib/bundle.sh
 source "$SCRIPT_DIR/lib/bundle.sh"
 

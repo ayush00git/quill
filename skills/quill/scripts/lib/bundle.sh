@@ -14,8 +14,9 @@
 #                  suffix so a CLAUDE.md or AGENTS.md copy can't auto-load.
 #   notes.md       the maintainer's notes for this repo, if any
 #   diffstat.txt   git diff --stat for the whole PR
+#   risk.json      areas needing extra attention (lib/risk.sh)
 #   prev/          the previous review and comments, on re-reviews
-# Requires lib/common.sh and lib/repo.sh.
+# Requires lib/common.sh, lib/repo.sh and lib/risk.sh.
 
 # Repo guidance worth reading, from the base branch. Missing ones are skipped.
 QUILL_GUIDANCE_FILES='CONTRIBUTING.md
@@ -95,14 +96,15 @@ write_guidance() {
 # inside a command substitution, where errexit doesn't apply).
 write_bundle() {
   local run_dir="$1" item="$2" gd="$3" wt="$4" mode="$5" slug repo number ctx key prev_md prev_cm nonce
-  repo="$(jq -r .repo "$item")"
-  number="$(jq -r .number "$item")"
-  slug="$(pr_slug "${repo%%/*}" "${repo#*/}" "$number")"
+  repo="$(jq -r .repo "$item")" || return 1
+  number="$(jq -r .number "$item")" || return 1
+  slug="$(pr_slug "${repo%%/*}" "${repo#*/}" "$number")" || return 1
   key="$repo#$number"
   ctx="$run_dir/ctx/$slug"
+  [ -n "$slug" ] || return 1
   rm -rf "$ctx"
   mkdir -p "$ctx"
-  nonce="$(new_nonce)"
+  nonce="$(new_nonce)" || return 1
 
   jq -n --arg pr "$key" --arg slug "$slug" --arg nonce "$nonce" --arg wt "$wt" \
     --arg ctx "$ctx" --arg refs "$run_dir/refs" --slurpfile item "$item" --slurpfile mode "$mode" '
@@ -129,8 +131,10 @@ write_bundle() {
   qgit_net --git-dir="$gd" diff --stat=120 "$(jq -r .mergeBase "$mode")" "$(jq -r .head "$mode")" >"$ctx/diffstat.txt" ||
     return 1
 
-  prev_md="$(jq -r '.quillState.reviewFile // empty' "$item")"
-  prev_cm="$(jq -r '.quillState.commentsFile // empty' "$item")"
+  risk_flags "$gd" "$(jq -r .mergeBase "$mode")" "$(jq -r .head "$mode")" >"$ctx/risk.json" || return 1
+
+  prev_md="$(jq -r '.quillState.reviewFile // empty' "$item")" || return 1
+  prev_cm="$(jq -r '.quillState.commentsFile // empty' "$item")" || return 1
   if [ -n "$prev_md" ] && [ -f "$(quill_home)/$prev_md" ]; then
     mkdir -p "$ctx/prev"
     cp "$(quill_home)/$prev_md" "$ctx/prev/review.md"

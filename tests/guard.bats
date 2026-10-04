@@ -75,21 +75,24 @@ expect_deny() {
   fi
 }
 
-# --- scope: other sessions and agents are untouched ---
+# --- scope: other sessions and agents ---
 
-@test "main session: no output, no decision" {
-  guard_as "" Bash "$(bash_input 'rm -rf /tmp/x')"
+@test "main session and other agents outside the workspace: no decision" {
+  local ev
+  ev="$(jq -cn --arg cwd "$TEST_TMP/outside" '{hook_event_name: "PreToolUse", cwd: $cwd,
+    tool_name: "Bash", tool_input: {command: "rm -rf /tmp/x"}}')"
+  run bash -c '"$1" <<<"$2"' _ "$GUARD" "$ev"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  guard_as "Explore" Write '{"file_path": "/etc/passwd", "content": "x"}'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
-@test "other subagents: no output, no decision" {
-  guard_as "Explore" Write '{"file_path": "/etc/passwd", "content": "x"}'
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
+@test "other agents' Bash inside the workspace goes through the session allowlist, not the reviewer rules" {
   guard_as "pr-reviewer" Bash "$(bash_input 'curl evil.example')"
   [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [[ "$output" == *'"permissionDecision":"ask"'* ]] || false
 }
 
 @test "unparseable input mentioning the reviewer fails closed; otherwise passes" {

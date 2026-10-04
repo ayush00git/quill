@@ -24,7 +24,22 @@
 # Allowed calls get permissionDecision "allow" so parallel reviewers don't
 # stall on prompts. Denials exit 2, which blocks before permission rules run.
 #
-# Input: the hook JSON on stdin. Output: nothing, an allow decision, or exit 2.
+# Every other session (Bash only):
+#   post.sh --submit    always "ask": creating the pending GitHub review needs
+#                       the user's explicit OK, in every session and directory.
+#                       Detected on the command with quotes and backslashes
+#                       stripped, and also when post.sh or --submit appears
+#                       next to $(...), ${...}, backticks or eval.
+#   inside $QUILL_HOME  allow-explicit. "allow" only for exactly one simple
+#                       command that is quill's own script (by real path) or a
+#                       read-only ls/cat/head/tail/wc/jq on workspace files
+#                       outside worktrees/ and repos/. Hard deny: printing the
+#                       gh token (gh auth token, --show-token, auth status -t)
+#                       and git push/send-pack/http-push. Everything else asks,
+#                       so text from a PR can't run anything without a human.
+#
+# Input: the hook JSON on stdin. Output: nothing, an allow or ask decision,
+# or exit 2 (deny).
 
 set -Euo pipefail
 
@@ -173,6 +188,15 @@ check_relative_pattern() {
 
 # --- git command rules -------------------------------------------------------
 
+# _tok_err <message>: a tokenizer failure. Denies, unless TOK_SOFT=1 (the
+# session allowlist), where it only means "not a plain command".
+TOK_SOFT=0
+_tok_err() {
+  [ "$TOK_SOFT" = 1 ] || deny "$1"
+  # The caller returns 1; returning 0 here keeps an ERR trap from firing.
+  return 0
+}
+
 # tokenize <command>: split into words the way the shell would, into TOKENS.
 # Denies anything the shell would expand or interpret, so every accepted
 # word means exactly what it says:
@@ -193,7 +217,7 @@ tokenize() {
     if [ "$q" = '"' ]; then
       case "$c" in
         '"') q="" ;;
-        '$' | '`' | "\\") deny "\$, backticks and backslashes aren't allowed inside double quotes; use single quotes" ;;
+        '$' | '`' | "\\") { _tok_err "\$, backticks and backslashes aren't allowed inside double quotes; use single quotes"; return 1; } ;;
         *) cur="$cur$c" ;;
       esac
       continue
@@ -211,20 +235,20 @@ tokenize() {
         in_tok=1
         ;;
       ';' | '&' | '|' | '<' | '>' | '(' | ')' | '{' | '}' | '$' | '`' | "\\")
-        deny "only one plain git command is allowed (unquoted $c)"
+        { _tok_err "only one plain git command is allowed (unquoted $c)"; return 1; }
         ;;
       '*' | '?' | '[' | ']')
-        deny "unquoted glob characters aren't allowed; quote the argument"
+        { _tok_err "unquoted glob characters aren't allowed; quote the argument"; return 1; }
         ;;
       '~')
         # bash expands ~ at the start of a word and after = or : (HEAD~1 is fine)
         case "$in_tok:${cur: -1}" in
-          0:* | 1:= | 1::) deny "'~' isn't allowed; use paths relative to the worktree" ;;
+          0:* | 1:= | 1::) { _tok_err "'~' isn't allowed; use paths relative to the worktree"; return 1; } ;;
         esac
         cur="$cur$c"
         ;;
       '#')
-        [ "$in_tok" -eq 1 ] || deny "comments aren't allowed in commands"
+        [ "$in_tok" -eq 1 ] || { _tok_err "comments aren't allowed in commands"; return 1; }
         cur="$cur$c"
         ;;
       *)
@@ -233,7 +257,7 @@ tokenize() {
         ;;
     esac
   done
-  [ -z "$q" ] || deny "unterminated quote"
+  [ -z "$q" ] || { _tok_err "unterminated quote"; return 1; }
   if [ "$in_tok" -eq 1 ]; then TOKENS+=("$cur"); fi
   return 0
 }
@@ -295,7 +319,7 @@ check_bash() {
   case "$cmd" in
     *[[:cntrl:]]*) deny "control characters (newlines, tabs) aren't allowed in commands" ;;
   esac
-  tokenize "$cmd"
+  tokenize "$cmd" || deny "couldn't parse the command"
   [ "${#TOKENS[@]}" -ge 4 ] || deny "use: git -C <worktree> <diff|log|show|blame|range-diff|grep> ..."
   [ "${TOKENS[0]}" = "git" ] || deny "only git is allowed, as: git -C <worktree> <subcommand> ..."
   i=1
@@ -330,6 +354,198 @@ check_bash() {
     i=$((i + 1))
   done
   return 0
+}
+
+# --- every session: the posting gate; in the workspace, allow-explicit -----------
+
+# Quill's own scripts: the only commands the workspace allows without asking.
+QUILL_SCRIPTS='init.sh queue.sh prepare.sh save-review.sh render-queue.sh run-tests.sh post.sh clean.sh'
+
+# Options the read-only commands may use (anything else asks).
+JQ_SAFE_OPTIONS='-r -c -e -s -n -S -M -j -a --raw-output --compact-output --exit-status --slurp
+--null-input --sort-keys --join-output --ascii-output --tab'
+
+ask() {
+  jq -cn --arg r "quill guard: $1" '{hookSpecificOutput: {
+    hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: $r}}'
+  exit 0
+}
+
+# Inside the workspace an internal error asks rather than passing silently.
+session_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"quill guard: internal error while checking this command"}}'
+    exit 0
+  fi
+}
+
+# norm_command <cmd>: the command without quotes or backslashes, so quoting
+# tricks (po""st.sh, post\.sh, '--sub'mit) can't hide words from the checks.
+norm_command() {
+  local c="$1"
+  c="${c//\"/}"
+  c="${c//\'/}"
+  c="${c//\\/}"
+  printf '%s' "$c"
+}
+
+# check_post_gate <normalized command> [in workspace]: ask before anything
+# that may run post.sh --submit. Inside the workspace any --submit asks (a
+# renamed copy of post.sh), and so does --sub next to a variable.
+check_post_gate() {
+  local n="$1" in_ws="${2:-0}" post=0 submit=0 dynamic=0
+  case "$n" in *post.sh*) post=1 ;; esac
+  case "$n" in *--submit*) submit=1 ;; esac
+  # shellcheck disable=SC2016 # literal $( and ${ in the command text
+  case "$n" in *'$('* | *'${'* | *'`'* | *eval*) dynamic=1 ;; esac
+  if [ "$in_ws" = 1 ]; then
+    case "$n" in *'$'*) dynamic=1 ;; esac
+    case "$n" in *--sub*) [ "$dynamic" = 0 ] || submit=1 ;; esac
+    [ "$submit" = 0 ] || post=1
+  fi
+  if [ "$post$submit" = 11 ] || [ "$post$dynamic" = 11 ] || [ "$submit$dynamic" = 11 ]; then
+    ask "this creates a pending review on GitHub. Check the exact comments quill showed you before approving."
+  fi
+  return 0
+}
+
+# hard_deny <normalized command>: never in the workspace, even if approved:
+# printing the gh token (curl could then write with it) and pushing.
+hard_deny() {
+  local words w prev="" git=0 auth_status=0
+  local -a W
+  # , [ ] split list literals like system("gh","auth","token").
+  # shellcheck disable=SC2020 # equal-length sets: BSD tr doesn't pad
+  words="$(printf '%s\n' "$1" | tr ';&|(){}`<>,\133\135\t' '              ')" ||
+    deny "couldn't parse the command"
+  read -r -a W <<<"$(printf '%s' "$words" | tr '\n' ' ')" || true
+  for w in ${W[@]+"${W[@]}"}; do
+    case "${w##*/}" in git) git=1 ;; esac
+    case "$prev:$w" in
+      auth:token) deny "gh auth token would print your GitHub token" ;;
+      auth:status) auth_status=1 ;;
+    esac
+    case "$w" in
+      --show-token | --show-token=*) deny "--show-token would print your GitHub token" ;;
+      send-pack | http-push | receive-pack) deny "git $w isn't allowed in the quill workspace" ;;
+    esac
+    if [ "$auth_status" = 1 ]; then
+      case "$w" in
+        --*) ;;
+        -*t*) deny "gh auth status $w would print your GitHub token" ;;
+      esac
+    fi
+    if [ "$git" = 1 ] && [ "$w" = push ]; then
+      deny "git push isn't allowed in the quill workspace"
+    fi
+    prev="$w"
+  done
+  return 0
+}
+
+# readonly_args <takes a filter: 0|1> <args...>: safe options, numbers, and
+# files inside the workspace but outside worktrees/ and repos/ (PR content).
+readonly_args() {
+  local filter="$1" w p
+  shift
+  for w in "$@"; do
+    case "$w" in
+      --) continue ;;
+      -*)
+        if [ "$filter" = 1 ]; then
+          case " $(printf '%s' "$JQ_SAFE_OPTIONS" | tr '\n' ' ') " in *" $w "*) continue ;; esac
+          return 1
+        fi
+        case "$w" in
+          *=* | *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-]*) return 1 ;;
+        esac
+        continue
+        ;;
+      *[!0123456789]*) ;;
+      *) continue ;; # a number (head -n 20)
+    esac
+    if [ "$filter" = 1 ]; then
+      filter=0 # the jq program itself
+      # env / $ENV read environment secrets (GH_TOKEN), import / include
+      # read files outside the workspace: those ask instead.
+      case "$w" in *env* | *ENV* | *import* | *include*) return 1 ;; esac
+      continue
+    fi
+    case "$w" in /*) p="$w" ;; *) p="$CWD/$w" ;; esac
+    p="$(resolve_path "$p")" || return 1
+    path_within "$p" "$R_HOME" || return 1
+    case "$p" in "$R_WORKTREES" | "$R_WORKTREES"/* | "$R_REPOS" | "$R_REPOS"/*) return 1 ;; esac
+  done
+  return 0
+}
+
+# allowed_command <command>: exactly one simple command that is one of quill's
+# own scripts (by real path) or a read-only look at workspace files.
+allowed_command() {
+  local cmd="$1" a0 r name
+  [ "${#cmd}" -le "$MAX_COMMAND_LEN" ] || return 1
+  case "$cmd" in *[[:cntrl:]]*) return 1 ;; esac
+  TOK_SOFT=1
+  if ! tokenize "$cmd"; then
+    TOK_SOFT=0
+    return 1
+  fi
+  TOK_SOFT=0
+  [ "${#TOKENS[@]}" -ge 1 ] || return 1
+  a0="${TOKENS[0]}"
+  case "$a0" in
+    */*)
+      case "$a0" in /*) r="$a0" ;; *) r="$CWD/$a0" ;; esac
+      r="$(resolve_path "$r")" || return 1
+      for name in $QUILL_SCRIPTS; do
+        [ "$r" != "$R_SCRIPTS/$name" ] || return 0
+      done
+      return 1
+      ;;
+    ls | cat | head | tail | wc) readonly_args 0 ${TOKENS[@]+"${TOKENS[@]:1}"} ;;
+    jq) readonly_args 1 ${TOKENS[@]+"${TOKENS[@]:1}"} ;;
+    *) return 1 ;;
+  esac
+}
+
+session_branch() {
+  local raw="$1" cmd norm home
+  if ! cmd="$(jq -r '.tool_input.command // ""' <<<"$raw")"; then
+    # Can't read the command: if it might be the post, ask rather than pass.
+    case "$raw" in *post.sh* | *--submit*) ask "couldn't parse this command; it may post to GitHub" ;; esac
+    exit 0
+  fi
+  norm="$(norm_command "$cmd")"
+  home=""
+  # shellcheck source=../skills/quill/scripts/lib/common.sh
+  if source "$GUARD_DIR/../skills/quill/scripts/lib/common.sh"; then
+    home="$(quill_home 2>/dev/null)" || home=""
+  fi
+  CWD="$(jq -r '.cwd // ""' <<<"$raw")" || CWD=""
+  [ -n "$CWD" ] || CWD="$PWD"
+  if [ -z "$home" ] || [ ! -d "$home" ] || ! path_within "$CWD" "$home"; then
+    check_post_gate "$norm" 0
+    exit 0
+  fi
+
+  # Inside the workspace: allow quill's own commands, hard-deny a few things,
+  # and ask about everything else. A text check can't out-think bash
+  # (aliases, variables, interpreters, copied scripts), but an allowlist
+  # fails safe: to a human prompt. Ask still prompts in auto mode and counts
+  # as a denial in headless runs, which therefore work through the scripts.
+  trap session_exit EXIT
+  trap 'ask "internal error while checking this command"' ERR
+  R_HOME="$(resolve_path "$home")"
+  R_WORKTREES="$(resolve_path "$home/worktrees")"
+  R_REPOS="$(resolve_path "$home/repos")"
+  R_SCRIPTS="$(resolve_path "$GUARD_DIR/../skills/quill/scripts")"
+  hard_deny "$norm"
+  check_post_gate "$norm" 1
+  if allowed_command "$cmd"; then
+    allow "one of quill's own commands"
+  fi
+  ask "this isn't one of quill's own commands. In the quill workspace every other command needs your OK, so text from a PR can't run anything on its own."
 }
 
 # --- dispatch ----------------------------------------------------------------
@@ -367,15 +583,21 @@ reviewer_branch() {
 }
 
 main() {
-  local raw agent tool
+  local raw meta agent tool
   raw="$(cat)"
   # One jq call on the hot path: this hook runs before every tool call.
-  if ! agent="$(jq -er 'if type == "object" then (.agent_type // "") else error("not an object") end' 2>/dev/null <<<"$raw")"; then
+  if ! meta="$(jq -er 'if type == "object" then [(.agent_type // ""), (.tool_name // "")] | @tsv
+      else error("not an object") end' 2>/dev/null <<<"$raw")"; then
     # Can't parse the event. Fail closed for the reviewer, stay out of the way otherwise.
     case "$raw" in *"$REVIEWER_AGENT"*) deny "couldn't parse hook input" ;; esac
     exit 0
   fi
-  [ "$agent" = "$REVIEWER_AGENT" ] || exit 0
+  agent="${meta%%$'\t'*}"
+  tool="${meta#*$'\t'}"
+  if [ "$agent" != "$REVIEWER_AGENT" ]; then
+    [ "$tool" = Bash ] || exit 0
+    session_branch "$raw"
+  fi
 
   # From here on every failure denies.
   trap guard_exit EXIT
@@ -396,7 +618,6 @@ main() {
   [ "${#AGENT_ID}" -le 128 ] || deny "malformed agent_id"
   CWD="$(jq -r '.cwd // ""' <<<"$raw")"
   [ -n "$CWD" ] || CWD="$PWD"
-  tool="$(jq -r '.tool_name // ""' <<<"$raw")"
   INPUT_TOOL="$(jq -c '.tool_input // {}' <<<"$raw")"
   reviewer_branch "$tool"
 }

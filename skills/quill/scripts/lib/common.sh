@@ -139,8 +139,12 @@ resolve_path() {
     return
   fi
   # Portable fallback (BSD realpath has no -m).
+  [ -n "$p" ] || return 1
   case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
-  while [ -L "$p" ]; do
+  while :; do
+    # A trailing slash makes [ -L ] follow the link, so strip it first.
+    while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p="${p%/}"; done
+    [ -L "$p" ] || break
     n=$((n + 1))
     [ "$n" -le 40 ] || return 1
     target="$(readlink "$p")"
@@ -153,7 +157,7 @@ resolve_path() {
   base="$(basename "$p")"
   dir="$(cd -P "$dir" 2>/dev/null && pwd -P)" || return 1
   case "$base" in
-    .) printf '%s\n' "$dir" ;;
+    / | .) printf '%s\n' "$dir" ;;
     ..) dirname "$dir" ;;
     *) if [ "$dir" = "/" ]; then printf '/%s\n' "$base"; else printf '%s/%s\n' "$dir" "$base"; fi ;;
   esac

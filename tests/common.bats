@@ -138,12 +138,16 @@ teardown() {
   real="$(cd -P "$TEST_TMP/secret" && pwd -P)/id_rsa"
   [ "$(resolve_path "$TEST_TMP/ws/worktrees/pr/link")" = "$real" ]
   path_within "$TEST_TMP/ws/worktrees/pr" "$TEST_TMP/ws"
-  ! path_within "$TEST_TMP/ws/worktrees/pr/link" "$TEST_TMP/ws"
-  ! path_within "$TEST_TMP/ws/worktrees/pr/dirlink/id_rsa" "$TEST_TMP/ws"
-  ! path_within "$TEST_TMP/ws/../secret/id_rsa" "$TEST_TMP/ws"
+  ! path_within "$TEST_TMP/ws/worktrees/pr/link" "$TEST_TMP/ws" || false
+  ! path_within "$TEST_TMP/ws/worktrees/pr/dirlink/id_rsa" "$TEST_TMP/ws" || false
+  ! path_within "$TEST_TMP/ws/../secret/id_rsa" "$TEST_TMP/ws" || false
+  # a trailing slash must not skip resolving the last symlink
+  ! path_within "$TEST_TMP/ws/worktrees/pr/dirlink/" "$TEST_TMP/ws" || false
+  ! path_within "$TEST_TMP/ws/worktrees/pr/dirlink//" "$TEST_TMP/ws" || false
+  ! path_within "" "$TEST_TMP/ws" || false
   # a sibling that shares the prefix is not inside
   mkdir -p "$TEST_TMP/ws2"
-  ! path_within "$TEST_TMP/ws2" "$TEST_TMP/ws"
+  ! path_within "$TEST_TMP/ws2" "$TEST_TMP/ws" || false
 }
 
 # --- locking ---
@@ -177,11 +181,18 @@ teardown() {
   printf 'k' >"$TEST_TMP/secret/id_rsa"
   ln -s "$TEST_TMP/secret/id_rsa" "$TEST_TMP/ws/worktrees/pr/link"
   ln -s link "$TEST_TMP/ws/worktrees/pr/link2"
+  ln -s ../../../secret "$TEST_TMP/ws/worktrees/pr/dirlink"
+  ln -s dirlink/ "$TEST_TMP/ws/worktrees/pr/link3"
   local real
   real="$(cd -P "$TEST_TMP/secret" && pwd -P)/id_rsa"
   [ "$(resolve_path "$TEST_TMP/ws/worktrees/pr/link2")" = "$real" ]
   [ "$(resolve_path "$TEST_TMP/ws/worktrees/pr/../pr/new-file")" = "$(cd -P "$TEST_TMP/ws/worktrees/pr" && pwd -P)/new-file" ]
   path_within "$TEST_TMP/ws/worktrees/pr" "$TEST_TMP/ws"
-  ! path_within "$TEST_TMP/ws/worktrees/pr/link2" "$TEST_TMP/ws"
-  ! path_within "$TEST_TMP/ws/../secret/id_rsa" "$TEST_TMP/ws"
+  ! path_within "$TEST_TMP/ws/worktrees/pr/link2" "$TEST_TMP/ws" || false
+  ! path_within "$TEST_TMP/ws/../secret/id_rsa" "$TEST_TMP/ws" || false
+  ! path_within "$TEST_TMP/ws/worktrees/pr/dirlink/" "$TEST_TMP/ws" || false
+  ! path_within "$TEST_TMP/ws/worktrees/pr/dirlink//" "$TEST_TMP/ws" || false
+  ! path_within "$TEST_TMP/ws/worktrees/pr/link3" "$TEST_TMP/ws" || false
+  ! path_within "" "$TEST_TMP/ws" || false
+  [ "$(resolve_path /)" = "/" ]
 }

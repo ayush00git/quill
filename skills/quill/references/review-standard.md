@@ -27,7 +27,7 @@ Don't review the diff alone.
 5. Use history to learn why the touched code exists: `git -C <worktree> log -L <start>,<end>:<path>`, `git -C <worktree> blame -L <start>,<end> <commit> -- <path>`, and `git -C <worktree> log -S<string> -- <path>`.
 6. If the PR deletes or loosens a check (validation, limit, permission test, timeout, retry guard, assertion), find the commit that added it with `log -S` or `blame` and say whether that reason still holds.
 
-Run git only as one plain command of the form `git -C <path> <diff|log|show|blame|range-diff|grep> ...`, with relative paths. Pipes, redirects, absolute paths outside the workspace, and other subcommands are blocked by design.
+Run git only as one plain command of the form `git -C <worktree> <diff|log|show|blame|range-diff|grep> ...`, with every other path relative. Pipes, redirects, absolute paths anywhere except after `-C`, `..` in paths, and other subcommands are blocked by design.
 
 ## What to check, in this order
 
@@ -35,7 +35,7 @@ Run git only as one plain command of the form `git -C <path> <diff|log|show|blam
 - Logic errors and off-by-ones. Unhandled edge cases: empty, nil/null, zero, negative, max values and overflow, unicode and encodings, very large input, concurrent calls.
 - Error paths that swallow failures, lose the cause, or leave state half-updated.
 - Whether the code does what the description and linked issue claim. If the description is missing or wrong, say what the code actually does.
-- Every newly used function, import, flag, config key and annotation must exist at the dependency version the build pins. Check the manifest (`pom.xml`, `go.mod`, `package.json`, ...) and the vendored or cached sources where you can. A hallucinated API is a bug, and a strong signal.
+- Every newly used function, import, flag, config key and annotation must exist at the dependency version the build pins. Check the manifest (`pom.xml`, `go.mod`, `package.json`, ...) and any vendored sources in the worktree. You can't reach dependency caches or the network, so when you can't confirm an API exists at that version, ask instead of asserting. A hallucinated API is a bug, and a strong signal.
 
 ### 2. Security
 - Validation at trust boundaries (network input, files, user config, deserialized data).

@@ -30,6 +30,9 @@ classify() {
      | [.court, .courtReason, .reReview, .waitingSince, .needsReview] | map(tostring) | join("|")' <<<"$1"
 }
 
+# Build jq updates in a single-quoted variable ($upd) and splice it in. Escaped
+# quotes inside a nested "$(...)" are unquoted by bash 3.2 (macOS), and the
+# braces in {type: ..., at: ...} then brace-expand into broken jq.
 reviewed() { # reviewed <state> <commit> <at>
   printf '.myReviews = [{state: "%s", submittedAt: "%s", commit: "%s"}]' "$1" "$3" "$2"
 }
@@ -71,9 +74,10 @@ reviewed() { # reviewed <state> <commit> <at>
 }
 
 @test "author pushed after my review: re-review, waiting since the push" {
-  run classify "$(item "$(reviewed CHANGES_REQUESTED "$OLD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"commit\", sha: \"$OLD\", at: \"2026-09-01T00:00:00Z\"},
-    {type: \"commit\", sha: \"$HEAD\", at: \"2026-09-03T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "commit", sha: "'"$OLD"'", at: "2026-09-01T00:00:00Z"},
+    {type: "commit", sha: "'"$HEAD"'", at: "2026-09-03T00:00:00Z"}]'
+  run classify "$(item "$(reviewed CHANGES_REQUESTED "$OLD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "mine|re-review: author pushed|true|2026-09-03T00:00:00Z|true" ]
 }
 
@@ -83,56 +87,66 @@ reviewed() { # reviewed <state> <commit> <at>
 }
 
 @test "force-push after my review counts as a push" {
-  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"force_push\", at: \"2026-09-04T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "force_push", at: "2026-09-04T00:00:00Z"}]'
+  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "mine|re-review: author pushed|true|2026-09-04T00:00:00Z|true" ]
 }
 
 @test "author replied (comment or review reply) after my review: re-review" {
-  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"comment\", by: \"bob\", at: \"2026-09-03T00:00:00Z\"},
-    {type: \"comment\", by: \"alice\", at: \"2026-09-04T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "comment", by: "bob", at: "2026-09-03T00:00:00Z"},
+    {type: "comment", by: "alice", at: "2026-09-04T00:00:00Z"}]'
+  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "mine|re-review: author replied|true|2026-09-04T00:00:00Z|true" ]
-  run classify "$(item "$(reviewed COMMENTED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"review\", by: \"alice\", state: \"COMMENTED\", at: \"2026-09-03T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "review", by: "alice", state: "COMMENTED", at: "2026-09-03T00:00:00Z"}]'
+  run classify "$(item "$(reviewed COMMENTED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "mine|re-review: author replied|true|2026-09-03T00:00:00Z|true" ]
 }
 
 @test "someone else commenting doesn't hand the ball back" {
-  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"comment\", by: \"bob\", at: \"2026-09-03T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "comment", by: "bob", at: "2026-09-03T00:00:00Z"}]'
+  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "waiting_on_author|my changes requested review has no reply yet|false|null|false" ]
 }
 
 @test "activity before my review doesn't count" {
-  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"comment\", by: \"alice\", at: \"2026-09-01T12:00:00Z\"},
-    {type: \"force_push\", at: \"2026-09-01T13:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "comment", by: "alice", at: "2026-09-01T12:00:00Z"},
+    {type: "force_push", at: "2026-09-01T13:00:00Z"}]'
+  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "waiting_on_author|my changes requested review has no reply yet|false|null|false" ]
 }
 
 @test "review re-requested from me or a team: re-review" {
-  run classify "$(item "$(reviewed APPROVED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"review_requested\", reviewer: {user: \"me\"}, at: \"2026-09-03T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "review_requested", reviewer: {user: "me"}, at: "2026-09-03T00:00:00Z"}]'
+  run classify "$(item "$(reviewed APPROVED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "mine|re-review: review re-requested|true|2026-09-03T00:00:00Z|true" ]
-  run classify "$(item "$(reviewed COMMENTED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"review_requested\", reviewer: {team: \"committers\"}, at: \"2026-09-03T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "review_requested", reviewer: {team: "committers"}, at: "2026-09-03T00:00:00Z"}]'
+  run classify "$(item "$(reviewed COMMENTED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "mine|re-review: review re-requested|true|2026-09-03T00:00:00Z|true" ]
-  run classify "$(item "$(reviewed COMMENTED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"review_requested\", reviewer: {user: \"bob\"}, at: \"2026-09-03T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "review_requested", reviewer: {user: "bob"}, at: "2026-09-03T00:00:00Z"}]'
+  run classify "$(item "$(reviewed COMMENTED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "waiting_on_author|my commented review has no reply yet|false|null|false" ]
 }
 
 @test "a forward-dated commit with an unchanged head is not a push" {
   # commit dates are author-controlled; only a moved head or a force-push counts
-  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"commit\", sha: \"$HEAD\", at: \"2030-01-01T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "commit", sha: "'"$HEAD"'", at: "2030-01-01T00:00:00Z"}]'
+  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "waiting_on_author|my changes requested review has no reply yet|false|null|false" ]
 }
 
 @test "a team re-request counts only while the PR is in my review-requested results" {
-  run classify "$(item "$(reviewed COMMENTED "$HEAD" 2026-09-02T00:00:00Z) | .sources = [\"repo\"] | .timeline = [
-    {type: \"review_requested\", reviewer: {team: \"other-team\"}, at: \"2026-09-03T00:00:00Z\"}]")"
+  upd=' | .sources = ["repo"] | .timeline = [
+    {type: "review_requested", reviewer: {team: "other-team"}, at: "2026-09-03T00:00:00Z"}]'
+  run classify "$(item "$(reviewed COMMENTED "$HEAD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "waiting_on_author|my commented review has no reply yet|false|null|false" ]
 }
 
@@ -144,9 +158,10 @@ reviewed() { # reviewed <state> <commit> <at>
 }
 
 @test "several kinds of activity: all named, waiting since the earliest" {
-  run classify "$(item "$(reviewed CHANGES_REQUESTED "$OLD" 2026-09-02T00:00:00Z) | .timeline = [
-    {type: \"comment\", by: \"alice\", at: \"2026-09-03T00:00:00Z\"},
-    {type: \"commit\", sha: \"$HEAD\", at: \"2026-09-04T00:00:00Z\"}]")"
+  upd=' | .timeline = [
+    {type: "comment", by: "alice", at: "2026-09-03T00:00:00Z"},
+    {type: "commit", sha: "'"$HEAD"'", at: "2026-09-04T00:00:00Z"}]'
+  run classify "$(item "$(reviewed CHANGES_REQUESTED "$OLD" 2026-09-02T00:00:00Z)$upd")"
   [ "$output" = "mine|re-review: author pushed, author replied|true|2026-09-03T00:00:00Z|true" ]
 }
 
@@ -158,7 +173,8 @@ reviewed() { # reviewed <state> <commit> <at>
 @test "explicit --pr is always mine unless closed or my own, drafts included" {
   run classify "$(item '.sources = ["explicit"] | .isDraft = true')"
   [ "$output" = "mine|requested on the command line|false|2026-09-01T00:00:00Z|true" ]
-  run classify "$(item ".sources = [\"explicit\"] | $(reviewed APPROVED "$HEAD" 2026-09-02T00:00:00Z)")"
+  upd='.sources = ["explicit"] | '
+  run classify "$(item "$upd$(reviewed APPROVED "$HEAD" 2026-09-02T00:00:00Z)")"
   [ "$output" = "mine|requested on the command line|true|2026-09-01T00:00:00Z|true" ]
   run classify "$(item '.sources = ["explicit"] | .state = "CLOSED"')"
   [ "$output" = "skip|closed or merged|false|null|false" ]

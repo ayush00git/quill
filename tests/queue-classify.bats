@@ -123,6 +123,26 @@ reviewed() { # reviewed <state> <commit> <at>
   [ "$output" = "waiting_on_author|my commented review has no reply yet|false|null|false" ]
 }
 
+@test "a forward-dated commit with an unchanged head is not a push" {
+  # commit dates are author-controlled; only a moved head or a force-push counts
+  run classify "$(item "$(reviewed CHANGES_REQUESTED "$HEAD" 2026-09-02T00:00:00Z) | .timeline = [
+    {type: \"commit\", sha: \"$HEAD\", at: \"2030-01-01T00:00:00Z\"}]")"
+  [ "$output" = "waiting_on_author|my changes requested review has no reply yet|false|null|false" ]
+}
+
+@test "a team re-request counts only while the PR is in my review-requested results" {
+  run classify "$(item "$(reviewed COMMENTED "$HEAD" 2026-09-02T00:00:00Z) | .sources = [\"repo\"] | .timeline = [
+    {type: \"review_requested\", reviewer: {team: \"other-team\"}, at: \"2026-09-03T00:00:00Z\"}]")"
+  [ "$output" = "waiting_on_author|my commented review has no reply yet|false|null|false" ]
+}
+
+@test "never reviewed: waiting since the latest request for me, if after creation" {
+  run classify "$(item '.timeline = [
+    {type: "review_requested", reviewer: {user: "bob"}, at: "2026-09-04T00:00:00Z"},
+    {type: "review_requested", reviewer: {user: "me"}, at: "2026-09-03T00:00:00Z"}]')"
+  [ "$output" = "mine|not reviewed yet|false|2026-09-03T00:00:00Z|true" ]
+}
+
 @test "several kinds of activity: all named, waiting since the earliest" {
   run classify "$(item "$(reviewed CHANGES_REQUESTED "$OLD" 2026-09-02T00:00:00Z) | .timeline = [
     {type: \"comment\", by: \"alice\", at: \"2026-09-03T00:00:00Z\"},

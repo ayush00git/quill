@@ -121,8 +121,9 @@ check_binding() {
     "$R_REVIEWS"/*)
       rel="${p#"$R_REVIEWS"/}"
       IFS=/ read -r date dotrun run kind slug _ <<<"$rel"
-      [ "$dotrun" = ".run" ] && [ -n "$run" ] && [ -n "$kind" ] ||
+      if [ "$dotrun" != ".run" ] || [ -z "$run" ] || [ -z "$kind" ]; then
         deny "$what: only your PR's context bundle and the run's references are readable: $p"
+      fi
       case "$kind" in
         refs)
           [ -n "$bound" ] || deny "$what: read your task.json first"

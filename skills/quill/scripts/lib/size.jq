@@ -4,11 +4,15 @@
 # generated files, lockfiles and vendored code (config "generatedPatterns").
 
 # glob_regex: a gitignore-style glob as an anchored regex. A pattern without a
-# "/" matches the file name at any depth; "**/" matches any number of
-# directories (including none), "/**" everything below, "*" and "?" stay
-# within one path segment.
+# "/" (other than a trailing one) matches at any depth; a leading or middle
+# "/" anchors it to the repo root. A trailing "/" means everything below that
+# directory. "**/" matches any number of directories (including none), "/**"
+# everything below, "*" and "?" stay within one path segment.
 def glob_regex:
-  (if contains("/") then . else "**/" + . end)
+  endswith("/") as $dir
+  | (if $dir then rtrimstr("/") else . end) as $core
+  | (if ($core | contains("/")) then ($core | ltrimstr("/")) else "**/" + $core end)
+  | (if $dir then . + "/**" else . end)
   | [scan("\\*\\*/|/\\*\\*$|\\*\\*|\\*|\\?|.")]
   | map(
       if . == "**/" then "(.*/)?"

@@ -25,6 +25,17 @@ group() { # group <items json> [cfg json] -> number:group:members per item
   [ "$output" = '["#12","#13","#14","#15","#7"]' ]
 }
 
+@test "a hostile body (a keyword then 60000 spaces) is scanned in linear time" {
+  # \s*:?\s+ took ~9 s on this; GitHub allows 65536-character bodies
+  local body start
+  body="$(printf 'fix%60000sx' '')"
+  start=$SECONDS
+  run keys "$(jq -cn --arg b "$body" '{repo: "apache/foo", title: "t", body: $b}')"
+  [ "$status" -eq 0 ]
+  [ "$output" = '[]' ]
+  [ $((SECONDS - start)) -le 3 ]
+}
+
 @test "JIRA keys: the repo's project by default, configurable, and bracketed title keys" {
   run keys '{"repo": "apache/kafka", "title": "KAFKA-1: x", "body": "relates to KAFKA-22, UTF-8, SHA-256, ISO-8601, JIRA-5"}'
   [ "$output" = '["KAFKA-1","KAFKA-22"]' ]

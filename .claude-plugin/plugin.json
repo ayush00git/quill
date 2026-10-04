@@ -1,0 +1,13 @@
+{
+  "name": "quill",
+  "displayName": "Quill",
+  "description": "Maintainer PR review queue: finds the PRs waiting on you, reviews each one in an isolated worktree with a read-only subagent, and drafts pending GitHub reviews that only you can see.",
+  "author": {
+    "name": "ayush00git",
+    "url": "https://github.com/ayush00git"
+  },
+  "homepage": "https://github.com/ayush00git/quill",
+  "repository": "https://github.com/ayush00git/quill",
+  "license": "Apache-2.0",
+  "keywords": ["code-review", "pull-requests", "github", "maintainers", "asf"]
+}

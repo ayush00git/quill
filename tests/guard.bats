@@ -17,6 +17,18 @@ setup() {
   mkdir -p "$TEST_TMP/outside"
   printf 'secret\n' >"$TEST_TMP/outside/id_rsa"
   GUARD="$REPO_ROOT/hooks/guard.sh"
+  RUNDIR="$QUILL_HOME/reviews/2026-10-04/.run/r1"
+  CTX="$RUNDIR/ctx/apache__foo__1"
+  jq -n --arg wt "$WT" '{pr: "apache/foo#1", worktree: $wt, nonce: "0123456789abcdef0123456789abcdef"}' >"$CTX/task.json"
+  AGENT=ag1
+  # Bind the default reviewer to PR 1, as its first read of task.json would.
+  bind_reviewer
+}
+
+# bind_reviewer: the reviewer ($AGENT) reads its task.json, which binds it.
+bind_reviewer() {
+  reviewer Read "$(jq -cn --arg p "$CTX/task.json" '{file_path: $p}')"
+  [ "$status" -eq 0 ]
 }
 
 teardown() {
@@ -27,7 +39,8 @@ teardown() {
 event() {
   jq -cn --arg a "$1" --arg t "$2" --argjson i "$3" --arg cwd "$QUILL_HOME" \
     '{hook_event_name: "PreToolUse", session_id: "s", cwd: $cwd, permission_mode: "default",
-      tool_name: $t, tool_input: $i} + (if $a == "" then {} else {agent_id: "ag1", agent_type: $a} end)'
+      tool_name: $t, tool_input: $i} + (if $a == "" then {} else {agent_id: $id, agent_type: $a} end)' \
+    --arg id "${AGENT-ag1}"
 }
 
 # guard_as <agent_type> <tool> <tool_input JSON>: runs the guard, sets status/output.
@@ -374,6 +387,8 @@ assert_bash_denied() {
   local real="$TEST_TMP/real-ws"
   mv "$QUILL_HOME" "$real"
   ln -s "$real" "$QUILL_HOME"
+  rm -rf "$real/.agents"
+  bind_reviewer
   reviewer Read "$(jq -cn --arg p "$real/worktrees/apache__foo__1/src/a.go" '{file_path: $p}')"
   expect_allow
   reviewer Read "$(jq -cn --arg p "$QUILL_HOME/worktrees/apache__foo__1/src/a.go" '{file_path: $p}')"
@@ -412,6 +427,108 @@ assert_bash_denied() {
     want="$(bash -c 'git() { printf "<git>"; printf "<%s>" "$@"; }; '"$c")"
     [ "$got" = "$want" ] || {
       printf 'command: %s\n got: %s\nwant: %s\n' "$c" "$got" "$want"
+      false
+    }
+  done
+}
+
+# --- one PR per reviewer ---
+
+# second_pr: a second PR's bundle and worktree in the same run.
+second_pr() {
+  WT2="$QUILL_HOME/worktrees/apache__foo__2"
+  CTX2="$RUNDIR/ctx/apache__foo__2"
+  mkdir -p "$WT2" "$CTX2"
+  printf 'y\n' >"$WT2/b.go"
+  jq -n --arg wt "$WT2" '{pr: "apache/foo#2", worktree: $wt, nonce: "fedcba9876543210fedcba9876543210"}' >"$CTX2/task.json"
+}
+
+read_as() { # read_as <path>
+  reviewer Read "$(jq -cn --arg p "$1" '{file_path: $p}')"
+}
+
+@test "binding: an unbound reviewer must read its task.json first" {
+  AGENT=fresh
+  read_as "$WT/src/a.go"
+  expect_deny
+  [[ "$output" == *"read your task.json first"* ]] || false
+  read_as "$CTX/meta.json"
+  expect_deny
+  reviewer Bash "$(bash_input "git -C $WT log")"
+  expect_deny
+  read_as "$CTX/task.json"
+  expect_allow
+  [ "$(cat "$QUILL_HOME/.agents/fresh")" = "$(cd -P "$CTX" && pwd -P)" ]
+  read_as "$WT/src/a.go"
+  expect_allow
+}
+
+@test "binding: a bound reviewer can't read another PR's bundle or worktree" {
+  second_pr
+  read_as "$CTX2/task.json"
+  expect_deny
+  [[ "$output" == *"belongs to another reviewer"* ]] || false
+  read_as "$WT2/b.go"
+  expect_deny
+  reviewer Bash "$(bash_input "git -C $WT2 log")"
+  expect_deny
+  reviewer Grep "$(jq -cn --arg p "$WT2" '{pattern: "y", path: $p}')"
+  expect_deny
+  reviewer Glob "$(jq -cn --arg p "$CTX2" '{pattern: "*", path: $p}')"
+  expect_deny
+}
+
+@test "binding: each reviewer gets its own PR" {
+  second_pr
+  AGENT=ag2
+  read_as "$CTX2/task.json"
+  expect_allow
+  read_as "$WT2/b.go"
+  expect_allow
+  read_as "$WT/src/a.go"
+  expect_deny
+  AGENT=ag1
+  read_as "$WT/src/a.go"
+  expect_allow
+}
+
+@test "binding: the run's refs are readable, other runs' refs and the reviews tree aren't" {
+  mkdir -p "$RUNDIR/refs" "$QUILL_HOME/reviews/2026-10-03/.run/r0/refs"
+  printf 's\n' >"$RUNDIR/refs/review-standard.md"
+  printf 's\n' >"$QUILL_HOME/reviews/2026-10-03/.run/r0/refs/review-standard.md"
+  printf 'q\n' >"$QUILL_HOME/reviews/2026-10-04/QUEUE.md"
+  read_as "$RUNDIR/refs/review-standard.md"
+  expect_allow
+  read_as "$QUILL_HOME/reviews/2026-10-03/.run/r0/refs/review-standard.md"
+  expect_deny
+  read_as "$QUILL_HOME/reviews/2026-10-04/QUEUE.md"
+  expect_deny
+  local p
+  for p in "$QUILL_HOME/reviews" "$QUILL_HOME/reviews/2026-10-04" "$RUNDIR" "$RUNDIR/ctx"; do
+    reviewer Grep "$(jq -cn --arg p "$p" '{pattern: "nonce", path: $p}')"
+    expect_deny || {
+      echo "path: $p"
+      false
+    }
+  done
+  reviewer Grep "$(jq -cn --arg p "$CTX" '{pattern: "nonce", path: $p}')"
+  expect_allow
+}
+
+@test "binding: a task.json that doesn't exist can't bind" {
+  AGENT=fresh
+  read_as "$RUNDIR/ctx/apache__foo__9/task.json"
+  expect_deny
+  [ ! -e "$QUILL_HOME/.agents/fresh" ]
+}
+
+@test "binding: a missing or malformed agent_id is denied" {
+  local id
+  for id in "" "../ag1" ".hidden" "a/b" "a b" "ag1;id" "ä1"; do
+    AGENT="$id"
+    read_as "$CTX/task.json"
+    expect_deny || {
+      echo "agent_id: $id"
       false
     }
   done

@@ -634,13 +634,18 @@ write_branch() {
   source "$GUARD_DIR/../skills/quill/scripts/lib/common.sh" || exit 0
   home="$(quill_home 2>/dev/null)" || exit 0
   [ -d "$home" ] || exit 0
+  # No ERR trap here: with errtrace it would fire inside $(...) and hand its
+  # output back as the path. Failures are checked explicitly and ask.
   trap session_exit EXIT
-  trap 'ask "internal error while checking this edit"' ERR
-  cwd="$(jq -r '.cwd // ""' <<<"$raw")"
+  cwd="$(jq -r '.cwd // ""' <<<"$raw")" || cwd=""
   [ -n "$cwd" ] || cwd="$PWD"
   case "$path" in /*) p="$path" ;; *) p="$cwd/$path" ;; esac
-  p="$(resolve_path "$p")"
-  rh="$(resolve_path "$home")"
+  p="$(resolve_path "$p")" || p=""
+  rh="$(resolve_path "$home")" || rh=""
+  case "$p:$rh" in
+    /*:/*) ;;
+    *) ask "couldn't work out which file this edits; approve only if it isn't the quill workspace's settings." ;;
+  esac
   lp="$(lower "$p")"
   lh="$(lower "$rh")"
   rel=""

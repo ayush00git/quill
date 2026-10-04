@@ -195,4 +195,14 @@ teardown() {
   ! path_within "$TEST_TMP/ws/worktrees/pr/link3" "$TEST_TMP/ws" || false
   ! path_within "" "$TEST_TMP/ws" || false
   [ "$(resolve_path /)" = "/" ]
+  # missing directories, as realpath -m: the existing part resolved, the rest
+  # added, . and .. applied
+  local ws
+  ws="$(cd -P "$TEST_TMP/ws" && pwd -P)"
+  ln -s "$TEST_TMP/ws" "$TEST_TMP/ws-link"
+  [ "$(resolve_path "$TEST_TMP/ws/.claude/settings.json")" = "$ws/.claude/settings.json" ]
+  [ "$(resolve_path "$TEST_TMP/ws-link/a/b/./c")" = "$ws/a/b/c" ]
+  [ "$(resolve_path "$TEST_TMP/ws/missing/../config.json")" = "$ws/config.json" ]
+  [ "$(resolve_path "$TEST_TMP/ws/missing/..")" = "$ws" ]
+  path_within "$TEST_TMP/ws-link/new/dir/file" "$TEST_TMP/ws"
 }

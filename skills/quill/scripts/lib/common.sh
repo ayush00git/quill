@@ -192,12 +192,13 @@ write_atomic() {
 # resolve_path <path>: absolute path with every symlink resolved. The final
 # component may not exist yet; its parent must.
 resolve_path() {
-  local p="$1" dir base target n=0
+  local p="$1" dir target tail c out n=0
   if command -v realpath >/dev/null 2>&1 && realpath -m / >/dev/null 2>&1; then
     realpath -m -- "$p"
     return
   fi
-  # Portable fallback (BSD realpath has no -m).
+  # Portable fallback (BSD realpath has no -m). Like realpath -m: follow the
+  # links that exist, then add the missing rest, with . and .. applied as text.
   [ -n "$p" ] || return 1
   case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
   while :; do
@@ -213,13 +214,23 @@ resolve_path() {
     esac
   done
   dir="$(dirname "$p")"
-  base="$(basename "$p")"
-  dir="$(cd -P "$dir" 2>/dev/null && pwd -P)" || return 1
-  case "$base" in
-    / | .) printf '%s\n' "$dir" ;;
-    ..) dirname "$dir" ;;
-    *) if [ "$dir" = "/" ]; then printf '/%s\n' "$base"; else printf '%s/%s\n' "$dir" "$base"; fi ;;
-  esac
+  tail="$(basename "$p")"
+  # The nearest existing directory; what's below it doesn't exist yet.
+  while [ ! -d "$dir" ]; do
+    tail="$(basename "$dir")/$tail"
+    dir="$(dirname "$dir")"
+  done
+  out="$(cd -P "$dir" 2>/dev/null && pwd -P)" || return 1
+  while [ -n "$tail" ]; do
+    c="${tail%%/*}"
+    case "$tail" in */*) tail="${tail#*/}" ;; *) tail="" ;; esac
+    case "$c" in
+      '' | . | /) ;;
+      ..) out="$(dirname "$out")" ;;
+      *) if [ "$out" = / ]; then out="/$c"; else out="$out/$c"; fi ;;
+    esac
+  done
+  printf '%s\n' "$out"
 }
 
 # path_within <path> <dir>: true when the resolved path is <dir> or below it.

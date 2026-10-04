@@ -326,3 +326,26 @@ edits() { # edits <pass|ask> <cwd> <path>...: every write tool on each path
     "python3 -c \"open('config.json','w')\""
   each allow "$CWD_IN" "cat config.json" "jq .tests config.json"
 }
+
+@test "a path that can't be resolved asks instead of passing" {
+  [ "$(id -u)" != 0 ] || skip "root can enter any directory"
+  # The portable resolver (as on macOS), and a directory it can't enter.
+  mkdir -p "$TEST_TMP/bin" "$QUILL_HOME/locked"
+  printf '#!/bin/sh\nexit 1\n' >"$TEST_TMP/bin/realpath"
+  chmod +x "$TEST_TMP/bin/realpath"
+  chmod 000 "$QUILL_HOME/locked"
+  PATH="$TEST_TMP/bin:$PATH" edit Write "$CWD_IN" "$QUILL_HOME/locked/x.json"
+  chmod 755 "$QUILL_HOME/locked"
+  decision ask
+}
+
+@test "edits under a missing directory are matched with the portable resolver too" {
+  mkdir -p "$TEST_TMP/bin"
+  printf '#!/bin/sh\nexit 1\n' >"$TEST_TMP/bin/realpath"
+  chmod +x "$TEST_TMP/bin/realpath"
+  ln -s "$QUILL_HOME" "$TEST_TMP/ws-link"
+  PATH="$TEST_TMP/bin:$PATH" edits ask "$CWD_OUT" \
+    "$QUILL_HOME/.claude/settings.json" \
+    "$TEST_TMP/ws-link/.claude/skills/x/SKILL.md" \
+    "$QUILL_HOME/missing/../config.json"
+}

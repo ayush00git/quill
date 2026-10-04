@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Test stub for gh. Every call is appended to $GH_STUB_LOG as one record
+# (the arguments joined by spaces, then a line with "--"). Responses come from
+# $GH_STUB_DIR/routes, one route per line: "<glob><TAB><fixture><TAB><exit>".
+# The first glob that matches the joined arguments wins: its fixture file
+# (relative to $GH_STUB_DIR, "-" for none) goes to stdout and the stub exits
+# with <exit> (default 0). No match exits 97 so tests fail loudly.
+set -u
+
+args="$*"
+if [ -n "${GH_STUB_LOG:-}" ]; then
+  printf '%s\n--\n' "$args" >>"$GH_STUB_LOG"
+fi
+
+routes="${GH_STUB_DIR:?GH_STUB_DIR is not set}/routes"
+tab="$(printf '\t')"
+if [ -f "$routes" ]; then
+  while IFS="$tab" read -r pattern fixture code; do
+    case "$pattern" in '' | '#'*) continue ;; esac
+    # shellcheck disable=SC2254 # the route glob is meant to be expanded
+    case "$args" in
+      $pattern)
+        if [ -n "$fixture" ] && [ "$fixture" != "-" ]; then
+          cat "$GH_STUB_DIR/$fixture"
+        fi
+        exit "${code:-0}"
+        ;;
+    esac
+  done <"$routes"
+fi
+
+printf 'gh stub: no route for: %s\n' "$args" >&2
+exit 97

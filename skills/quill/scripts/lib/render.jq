@@ -5,12 +5,15 @@
 
 # cell: text that is safe inside a markdown table cell. PR titles and
 # reasons come from PR authors or the reviewer: no pipes, no line breaks,
+# no live links, images or HTML (a preview would fetch the author's URLs),
 # bounded length.
 def cell($max):
   tostring
   | gsub("[\r\n\t]+"; " ")
+  | if length > $max then .[0:$max - 3] + "..." else . end
   | gsub("\\|"; "\\|")
-  | if length > $max then .[0:$max - 3] + "..." else . end;
+  | gsub("<"; "&lt;") | gsub(">"; "&gt;")
+  | gsub("(?<c>[\\[\\]`])"; "\\\(.c)");
 
 def ago($now):
   if . == null then "?" else

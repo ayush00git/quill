@@ -54,6 +54,16 @@ map() {
   [ "$(jq -c '."gone.txt"' <<<"$m")" = '{"LEFT":[[1,3]]}' ]
 }
 
+@test "the user's git config can't change the map (it must match GitHub's diff)" {
+  local before
+  before="$(map | jq -cS .)"
+  git config --global diff.interHunkContext 20
+  git config --global diff.noprefix true
+  git config --global diff.algorithm patience
+  git config --global diff.indentHeuristic false
+  [ "$(map | jq -cS .)" = "$before" ]
+}
+
 @test "renames use the new path and only the changed hunk, like GitHub" {
   run map
   [ "$(jq -c '."new_name.txt"' <<<"$output")" = '{"LEFT":[[2,8]],"RIGHT":[[2,8]]}' ]

@@ -19,8 +19,12 @@ diff_map() {
   local gd="$1" from="$2" to="$3" raw rc
   raw="$(mktemp "${TMPDIR:-/tmp}/quill-diffmap.XXXXXX")" || return 1
   # -M matches GitHub's rename detection; 3 lines of context like GitHub.
+  # Everything else that shapes hunks or paths is pinned to git's defaults,
+  # so the user's diff.interHunkContext, diff.algorithm, diff.indentHeuristic
+  # or diff.noprefix can't make this map disagree with GitHub's diff.
   qgit_net --git-dir="$gd" -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv \
-    -M -U3 "$from" "$to" >"$raw"
+    -M -U3 --inter-hunk-context=0 --diff-algorithm=myers --indent-heuristic \
+    --src-prefix=a/ --dst-prefix=b/ "$from" "$to" >"$raw"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     rm -f "$raw"

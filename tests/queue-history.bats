@@ -82,3 +82,20 @@ JSON
   run jq -c '[.items[] | .authorHistory != null]' "$RUN/q.json"
   [ "$output" = '[false,false,true]' ]
 }
+
+@test "one login that can't be spliced costs only its own PR its history" {
+  history_fixture
+  # shellcheck source=../skills/quill/scripts/lib/common.sh
+  source "$SCRIPTS/lib/common.sh"
+  # shellcheck source=../skills/quill/scripts/lib/history.sh
+  source "$SCRIPTS/lib/history.sh"
+  mkdir -p "$RUN"
+  jq -n '{items: [
+    {repo: "apache/foo", number: 1, court: "mine", author: {login: "alice", isBot: false}},
+    {repo: "apache/foo", number: 2, court: "mine", author: {login: "corp_user", isBot: false}}]}' >"$RUN/q.json"
+  run add_author_history "$RUN/q.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no author history for apache/foo @corp_user"* ]] || false
+  run jq -c '[.items[] | .authorHistory != null]' "$RUN/q.json"
+  [ "$output" = '[true,false]' ]
+}

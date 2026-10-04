@@ -93,14 +93,13 @@ each() { # each <pass|allow|ask|deny> <cwd> <command>...
 
 # --- the workspace: allow ---
 
-@test "workspace: quill's own scripts are allowed (by real path)" {
+@test "workspace: quill's own scripts are allowed (by real path), except run-tests.sh" {
   each allow "$CWD_IN" \
     "$SCR/init.sh" \
     "$SCR/queue.sh --run-dir reviews/2026-10-04/.run/r1 --repo apache/foo" \
     "$SCR/prepare.sh --run-dir 'reviews/2026-10-04/.run/r1'" \
     "$SCR/save-review.sh --run-dir reviews/2026-10-04/.run/r1 --all" \
     "$SCR/render-queue.sh --run-dir reviews/2026-10-04/.run/r1" \
-    "$SCR/run-tests.sh --run-dir reviews/2026-10-04/.run/r1" \
     "$SCR/post.sh --dry-run apache/foo#1" \
     "$SCR/clean.sh" \
     "$SCR/../scripts/queue.sh --run-dir x"
@@ -219,4 +218,111 @@ each() { # each <pass|allow|ask|deny> <cwd> <command>...
     tool_input: {file_path: "/etc/x", content: "gh pr merge 1"}}')"
   run bash -c '"$1" <<<"$2"' _ "$GUARD" "$ev"
   decision pass
+}
+
+# --- running PR code: run-tests.sh ---
+
+@test "run-tests.sh asks, inside the workspace or not; other projects' run-tests.sh pass" {
+  each ask "$CWD_IN" "$SCR/run-tests.sh --run-dir $QUILL_HOME/reviews/2026-10-04/.run/r1"
+  each ask "$CWD_OUT" "/x/skills/quill/scripts/run-tests.sh --run-dir /x/r1"
+  each pass "$CWD_OUT" "./run-tests.sh" "make test"
+}
+
+@test "run-tests.sh hidden by quoting, variables or a link still asks" {
+  ln -s "$SCR/run-tests.sh" "$QUILL_HOME/rt"
+  each ask "$CWD_IN" \
+    "\"$SCR/run-tests.sh\" --run-dir x" \
+    "$SCR/run-te''sts.sh --run-dir x" \
+    "$SCR/run\\-tests.sh --run-dir x" \
+    "\$(printf run-tests.sh) --run-dir x" \
+    "bash $SCR/run-tests.sh --run-dir x" \
+    "./rt --run-dir x" \
+    "$QUILL_HOME/rt --run-dir x"
+}
+
+@test "scheduled runs: allowed only with QUILL_HEADLESS and tests.headless true, for the real script alone" {
+  local cmd="$SCR/run-tests.sh --run-dir x"
+  # not opted in
+  QUILL_HEADLESS=1 each ask "$CWD_IN" "$cmd"
+  printf '{"tests": {"headless": "true"}}\n' >"$QUILL_HOME/config.json"
+  QUILL_HEADLESS=1 each ask "$CWD_IN" "$cmd"
+  # opted in, but not a scheduled run
+  printf '{"tests": {"headless": true}}\n' >"$QUILL_HOME/config.json"
+  each ask "$CWD_IN" "$cmd"
+  # opted in and scheduled: exactly the script, nothing around it
+  QUILL_HEADLESS=1 each allow "$CWD_IN" "$cmd"
+  QUILL_HEADLESS=1 each ask "$CWD_IN" \
+    "bash $cmd" \
+    "QUILL_HEADLESS=1 $cmd" \
+    "$cmd; touch x" \
+    "$cmd && ls" \
+    "cp $SCR/run-tests.sh $QUILL_HOME/r.sh" \
+    "$TEST_TMP/elsewhere/run-tests.sh --run-dir x"
+}
+
+# --- the files that decide what may run ---
+
+# edit <tool> <cwd> <path>: a main-session file edit through the guard.
+edit() {
+  local ev
+  ev="$(jq -cn --arg t "$1" --arg cwd "$2" --arg p "$3" '{hook_event_name: "PreToolUse", session_id: "s",
+    cwd: $cwd, permission_mode: "acceptEdits", tool_name: $t,
+    tool_input: (if $t == "NotebookEdit" then {notebook_path: $p, new_source: "x"}
+                 else {file_path: $p, content: "x", old_string: "a", new_string: "b"} end)}')"
+  run bash -c '"$1" <<<"$2"' _ "$GUARD" "$ev"
+}
+
+edits() { # edits <pass|ask> <cwd> <path>...: every write tool on each path
+  local want="$1" cwd="$2" p t
+  shift 2
+  for p in "$@"; do
+    for t in Write Edit MultiEdit NotebookEdit; do
+      edit "$t" "$cwd" "$p"
+      decision "$want" || {
+        echo "$t $p"
+        return 1
+      }
+    done
+  done
+}
+
+@test "edits to the workspace's config, Claude settings and instructions ask, from any session" {
+  printf '{}\n' >"$QUILL_HOME/config.json"
+  local f
+  for f in config.json .claude/settings.json .claude/settings.local.json .claude/skills/x/SKILL.md \
+    .claude/agents/a.md CLAUDE.md CLAUDE.local.md .mcp.json; do
+    edits ask "$CWD_IN" "$QUILL_HOME/$f"
+    edits ask "$CWD_OUT" "$QUILL_HOME/$f"
+  done
+}
+
+@test "other spellings of a protected file ask too" {
+  printf '{}\n' >"$QUILL_HOME/config.json"
+  mkdir -p "$QUILL_HOME/notes"
+  ln -s "$QUILL_HOME" "$TEST_TMP/ws-link"
+  ln "$QUILL_HOME/config.json" "$TEST_TMP/elsewhere/hard.json"
+  edits ask "$CWD_IN" config.json ./notes/../config.json .claude/settings.json
+  edits ask "$CWD_OUT" \
+    "$QUILL_HOME/Config.JSON" \
+    "$QUILL_HOME/.Claude/settings.json" \
+    "$QUILL_HOME/notes/../config.json" \
+    "$TEST_TMP/ws-link/config.json" \
+    "$TEST_TMP/elsewhere/hard.json"
+}
+
+@test "edits elsewhere pass untouched" {
+  edits pass "$CWD_IN" "$QUILL_HOME/notes/todo.md" "$QUILL_HOME/reviews/2026-10-04/x.md"
+  edits pass "$CWD_OUT" "$TEST_TMP/elsewhere/config.json" "$TEST_TMP/elsewhere/.claude/settings.json" "$TEST_TMP/elsewhere/CLAUDE.md"
+}
+
+@test "shell writes to config.json in the workspace ask; reading it is still allowed" {
+  printf '{}\n' >"$QUILL_HOME/config.json"
+  each ask "$CWD_IN" \
+    "jq '.tests.headless = true' config.json > c.json && mv c.json config.json" \
+    "printf '{}' > config.json" \
+    "tee config.json" \
+    "sed -i s/a/b/ config.json" \
+    "cp $TEST_TMP/x config.json" \
+    "python3 -c \"open('config.json','w')\""
+  each allow "$CWD_IN" "cat config.json" "jq .tests config.json"
 }

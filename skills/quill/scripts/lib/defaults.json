@@ -35,6 +35,7 @@
   "tests": {
     "runtime": "docker",
     "timeoutSec": 900,
+    "headless": false,
     "network": "bridge",
     "memory": "6g",
     "cpus": 4,

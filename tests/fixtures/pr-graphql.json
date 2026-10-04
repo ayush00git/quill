@@ -1,0 +1,32 @@
+{
+  "number": 7, "url": "https://github.com/apache/foo/pull/7", "title": "Add max frame size", "body": "Fixes FOO-12",
+  "isDraft": false, "state": "OPEN", "createdAt": "2026-09-01T10:00:00Z", "updatedAt": "2026-09-03T10:00:00Z",
+  "author": {"__typename": "User", "login": "newdev42"}, "authorAssociation": "FIRST_TIME_CONTRIBUTOR",
+  "baseRefName": "main", "baseRefOid": "1111111111111111111111111111111111111111",
+  "headRefOid": "2222222222222222222222222222222222222222", "headRepository": {"nameWithOwner": "newdev42/foo"},
+  "additions": 142, "deletions": 18, "changedFiles": 120,
+  "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "reviewDecision": "CHANGES_REQUESTED",
+  "labels": {"nodes": [{"name": "io"}, {"name": "security"}]},
+  "closingIssuesReferences": {"nodes": [{"number": 12, "repository": {"nameWithOwner": "apache/foo"}}]},
+  "files": {"totalCount": 120, "nodes": [{"path": "src/FrameReader.java", "additions": 40, "deletions": 3, "changeType": "MODIFIED"}]},
+  "commits": {"nodes": [{"commit": {"oid": "2222222222222222222222222222222222222222",
+    "statusCheckRollup": {"state": "PENDING", "contexts": {"totalCount": 3}},
+    "checkSuites": {"nodes": [{"status": "COMPLETED", "conclusion": "ACTION_REQUIRED", "app": {"slug": "github-actions"}}]}}}]},
+  "myReviews": {"nodes": [
+    {"state": "CHANGES_REQUESTED", "submittedAt": "2026-09-02T09:00:00Z", "commit": {"oid": "3333333333333333333333333333333333333333"}},
+    {"state": "COMMENTED", "submittedAt": "2026-09-01T12:00:00Z", "commit": {"oid": "3333333333333333333333333333333333333333"}},
+    {"state": "PENDING", "submittedAt": null, "commit": {"oid": "2222222222222222222222222222222222222222"}}
+  ]},
+  "reviewRequests": {"nodes": [
+    {"requestedReviewer": {"__typename": "Team", "slug": "committers"}},
+    {"requestedReviewer": {"__typename": "User", "login": "me"}},
+    {"requestedReviewer": null}
+  ]},
+  "timelineItems": {"nodes": [
+    {"__typename": "PullRequestCommit", "commit": {"oid": "3333333333333333333333333333333333333333", "committedDate": "2026-09-01T10:00:00Z"}},
+    {"__typename": "PullRequestReview", "submittedAt": "2026-09-02T09:00:00Z", "state": "CHANGES_REQUESTED", "author": {"login": "me"}},
+    {"__typename": "HeadRefForcePushedEvent", "createdAt": "2026-09-03T08:00:00Z"},
+    {"__typename": "IssueComment", "createdAt": "2026-09-03T09:00:00Z", "author": null},
+    {"__typename": "ReviewRequestedEvent", "createdAt": "2026-09-03T09:30:00Z", "requestedReviewer": {"__typename": "User", "login": "me"}}
+  ]}
+}

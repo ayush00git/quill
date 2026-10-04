@@ -11,6 +11,7 @@ setup() {
   gh_respond 'api --method GET user --jq .login' <<'JSON'
 me
 JSON
+  gh_respond_with 'api graphql *' fake-graphql-prs
 }
 
 teardown() {
@@ -70,7 +71,7 @@ JSON
 @test "--pr reviews exactly that PR and skips discovery" {
   run "$SCRIPTS/queue.sh" --run-dir "$RUN" --pr https://github.com/apache/foo/pull/42/files
   [ "$status" -eq 0 ]
-  run jq -c '.items' "$RUN/queue.json"
+  run jq -c '[.items[] | {repo, number, url, sources}]' "$RUN/queue.json"
   [ "$output" = '[{"repo":"apache/foo","number":42,"url":"https://github.com/apache/foo/pull/42","sources":["explicit"]}]' ]
   run grep -c 'search prs' "$GH_STUB_LOG"
   [ "$output" = "0" ]

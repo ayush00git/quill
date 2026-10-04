@@ -1,0 +1,35 @@
+fragment PR on PullRequest {
+  number url title body isDraft state createdAt updatedAt
+  author { __typename login }
+  authorAssociation
+  baseRefName baseRefOid headRefOid
+  headRepository { nameWithOwner }
+  additions deletions changedFiles
+  mergeable mergeStateStatus reviewDecision
+  labels(first: 30) { nodes { name } }
+  closingIssuesReferences(first: 10) { nodes { number repository { nameWithOwner } } }
+  files(first: 100) { totalCount nodes { path additions deletions changeType } }
+  commits(last: 1) {
+    nodes {
+      commit {
+        oid
+        statusCheckRollup { state contexts { totalCount } }
+        checkSuites(first: 30) { nodes { status conclusion app { slug } } }
+      }
+    }
+  }
+  myReviews: reviews(last: 20, author: $me) { nodes { state submittedAt commit { oid } } }
+  reviewRequests(first: 30) {
+    nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } }
+  }
+  timelineItems(last: 100, itemTypes: [PULL_REQUEST_COMMIT, HEAD_REF_FORCE_PUSHED_EVENT, ISSUE_COMMENT, PULL_REQUEST_REVIEW, REVIEW_REQUESTED_EVENT]) {
+    nodes {
+      __typename
+      ... on PullRequestCommit { commit { oid committedDate } }
+      ... on HeadRefForcePushedEvent { createdAt }
+      ... on IssueComment { createdAt author { login } }
+      ... on PullRequestReview { submittedAt state author { login } }
+      ... on ReviewRequestedEvent { createdAt requestedReviewer { __typename ... on User { login } ... on Team { slug } } }
+    }
+  }
+}

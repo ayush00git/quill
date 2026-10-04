@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake `gh api graphql` for the PR batch query: answers every
+# `pN: repository(owner: "o", name: "r") { pullRequest(number: K) ... }`
+# alias with a minimal open PR, so tests that don't care about details
+# still exercise the real query and normalize.jq.
+set -euo pipefail
+query=""
+for a in "$@"; do
+  case "$a" in query=*) query="${a#query=}" ;; esac
+done
+printf '%s\n' "$query" |
+  sed -n 's/^\(p[0-9]*\): repository(owner: "\([^"]*\)", name: "\([^"]*\)") { pullRequest(number: \([0-9]*\)).*/\1 \2 \3 \4/p' |
+  jq -R -s '
+    [split("\n")[] | select(length > 0) | split(" ") | {alias: .[0], repo: "\(.[1])/\(.[2])", number: (.[3] | tonumber)}]
+    | {data: (map({key: .alias, value: {pullRequest: {
+        number, url: "https://github.com/\(.repo)/pull/\(.number)", title: "PR \(.number)", body: "",
+        isDraft: false, state: "OPEN", createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-02T00:00:00Z",
+        author: {__typename: "User", login: "alice"}, authorAssociation: "CONTRIBUTOR",
+        baseRefName: "main", baseRefOid: ("b" * 40), headRefOid: ("a" * 40),
+        headRepository: {nameWithOwner: "alice/fork"}, additions: 1, deletions: 0, changedFiles: 1,
+        mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: null,
+        labels: {nodes: []}, closingIssuesReferences: {nodes: []},
+        files: {totalCount: 1, nodes: [{path: "README.md", additions: 1, deletions: 0, changeType: "MODIFIED"}]},
+        commits: {nodes: [{commit: {oid: ("a" * 40), statusCheckRollup: {state: "SUCCESS", contexts: {totalCount: 1}}, checkSuites: {nodes: []}}}]},
+        myReviews: {nodes: []}, reviewRequests: {nodes: []}, timelineItems: {nodes: []}}}}) | from_entries)}'

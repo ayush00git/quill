@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Fake `gh api graphql` answering every alias with a PR whose body is ~300 KB,
+# to prove responses never travel through command-line arguments.
+set -euo pipefail
+"$REPO_ROOT/tests/helpers/fake-graphql-prs" "$@" | jq '.data |= map_values(.pullRequest.body = ("x" * 300000))'

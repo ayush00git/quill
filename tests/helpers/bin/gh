@@ -6,7 +6,9 @@
 # $GH_STUB_DIR/routes, one route per line: "<glob><TAB><fixture><TAB><exit>".
 # The first glob that matches the joined arguments wins: its fixture file
 # (relative to $GH_STUB_DIR, "-" for none) goes to stdout and the stub exits
-# with <exit> (default 0). No match exits 97 so tests fail loudly.
+# with <exit> (default 0). An executable fixture is run with gh's arguments
+# instead, for responses that depend on the request. No match exits 97 so
+# tests fail loudly.
 set -u
 
 args="$*"
@@ -23,6 +25,10 @@ if [ -f "$routes" ]; then
     case "$args" in
       $pattern)
         if [ -n "$fixture" ] && [ "$fixture" != "-" ]; then
+          if [ -x "$GH_STUB_DIR/$fixture" ]; then
+            "$GH_STUB_DIR/$fixture" "$@"
+            exit $?
+          fi
           cat "$GH_STUB_DIR/$fixture"
         fi
         exit "${code:-0}"

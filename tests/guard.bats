@@ -149,7 +149,7 @@ expect_deny() {
   reviewer Grep "$(jq -cn --arg p "$TEST_TMP/outside" '{pattern: "secret", path: $p}')"
   expect_deny
   local g
-  for g in "/etc/*" "~/.ssh/*" "../*" "../../outside/*" "a/../../b" "**/CLAUDE.md"; do
+  for g in "/etc/*" "~/.ssh/*" "../*" "../../outside/*" "a/../../b" "**/CLAUDE.md" "{..,src}/*" "src/..{,}/x"; do
     reviewer Grep "$(jq -cn --arg p "$WT" --arg g "$g" '{pattern: "x", path: $p, glob: $g}')"
     expect_deny
   done
@@ -161,7 +161,7 @@ expect_deny() {
   reviewer Glob '{"pattern": "**/*.go"}'
   expect_deny
   local g
-  for g in "/home/**" "~/**" "../**" "src/../../**" ".claude/**"; do
+  for g in "/home/**" "~/**" "../**" "src/../../**" ".claude/**" "{..,src}/**" "x{/..,}/**"; do
     reviewer Glob "$(jq -cn --arg p "$WT" --arg g "$g" '{pattern: $g, path: $p}')"
     expect_deny
   done
@@ -277,6 +277,29 @@ assert_bash_denied() {
   assert_bash_denied "git -C $QUILL_HOME/worktrees/escape log"
 }
 
+@test "reviewer Bash: -C can't name a directory inside a worktree (PR-embedded bare repo)" {
+  # A PR can commit a directory shaped like a bare repo. git run there treats
+  # it as the repository and obeys its config (textconv runs on log -p).
+  mkdir -p "$WT/docs/evil/objects" "$WT/docs/evil/refs"
+  assert_bash_denied \
+    "git -C $WT/docs/evil log -p" \
+    "git -C $WT/src log" \
+    "git -C worktrees/apache__foo__1/src diff"
+}
+
+@test "reviewer Bash: overlong commands are denied before tokenizing" {
+  local pad
+  pad="$(head -c 5000 /dev/zero | tr '\0' 'a')"
+  assert_bash_denied "git -C $WT log --grep='$pad'"
+}
+
+@test "reviewer: an unexpected exit in the guard becomes a deny" {
+  run bash -c 'source "$1"; trap guard_exit EXIT; exit 1' _ "$GUARD"
+  [ "$status" -eq 2 ]
+  run bash -c 'source "$1"; trap guard_exit EXIT; exit 0' _ "$GUARD"
+  [ "$status" -eq 0 ]
+}
+
 @test "reviewer Bash: absolute, ~ and .. arguments are denied (except after -C)" {
   assert_bash_denied \
     "git -C $WT diff /etc/passwd src/a.go" \
@@ -324,7 +347,10 @@ assert_bash_denied() {
     "git -C $WT diff -Oorder" \
     "git -C $WT log --orderfile=order" \
     "git -C $WT diff --stdin" \
-    "git -C $WT log --std"
+    "git -C $WT log --std" \
+    "git -C $WT log --show-signature" \
+    "git -C $WT show --show-sig HEAD" \
+    "git -C $WT log --help"
 }
 
 @test "reviewer Bash: background commands are denied" {

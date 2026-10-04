@@ -22,11 +22,23 @@
 set -Euo pipefail
 
 REVIEWER_AGENT='quill:pr-reviewer'
+MAX_COMMAND_LEN=4096
 GUARD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 deny() {
   printf 'quill guard: %s\n' "$1" >&2
   exit 2
+}
+
+# Any exit other than 0 (allow, or pass-through) and 2 (deny) is a non-blocking
+# hook error, and Claude Code would run the tool. In the reviewer branch, turn
+# every such exit (set -u aborts, a failing jq, ...) into a deny.
+guard_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+    printf 'quill guard: internal error (exit %s), denying\n' "$rc" >&2
+    exit 2
+  fi
 }
 
 allow() {
@@ -74,7 +86,7 @@ check_relative_pattern() {
     /* | '~'*) deny "$what must be relative: $v" ;;
   esac
   case "$v" in
-    .. | ../* | */.. | *'/../'*) deny "$what can't contain '..': $v" ;;
+    *..*) deny "$what can't contain '..': $v" ;;
   esac
   is_instruction_path "$v" && deny "$what can't target instruction files: $v"
   return 0
@@ -152,7 +164,7 @@ tokenize() {
 # rejected when it is a prefix of any of these (e.g. --out, --no-ind).
 DENIED_LONG='--output --ext-diff --textconv --no-index --contents --ignore-revs-file
 --file --orderfile --open-files-in-pager --stdin --exec-path --git-dir --work-tree
---config-env'
+--config-env --show-signature --help'
 
 check_git_token() {
   local sub="$1" t="$2" name d flags
@@ -197,6 +209,9 @@ check_git_token() {
 check_bash() {
   local cmd="$1" dir sub i
   [ -n "$cmd" ] || deny "empty command"
+  # The tokenizer is quadratic in bash, and a PreToolUse hook that times out
+  # lets the call through, so cap the length well below that.
+  [ "${#cmd}" -le "$MAX_COMMAND_LEN" ] || deny "command too long (max $MAX_COMMAND_LEN characters)"
   # Newlines, tabs and other control characters are never part of a plain command.
   case "$cmd" in
     *[[:cntrl:]]*) deny "control characters (newlines, tabs) aren't allowed in commands" ;;
@@ -215,8 +230,11 @@ check_bash() {
     *) dir="$CWD/$dir" ;;
   esac
   path_within "$dir" "$HOME_DIR/worktrees" || deny "-C must name a worktree under $HOME_DIR/worktrees: ${TOKENS[$((i + 1))]}"
-  [ "$(resolve_path "$dir")" != "$(resolve_path "$HOME_DIR/worktrees")" ] ||
-    deny "-C must name one worktree, not the worktrees directory"
+  # Exactly a worktree root, never a directory inside one: git treats a PR
+  # directory shaped like a bare repo (HEAD, objects/, refs/, config) as the
+  # repository and obeys its config, e.g. a textconv command run by log -p.
+  [ "$(dirname "$(resolve_path "$dir")")" = "$(resolve_path "$HOME_DIR/worktrees")" ] ||
+    deny "-C must name a worktree root, $HOME_DIR/worktrees/<name>, not a directory inside it"
   i=$((i + 2))
   sub="${TOKENS[$i]:-}"
   case "$sub" in
@@ -277,6 +295,7 @@ main() {
   [ "$agent" = "$REVIEWER_AGENT" ] || exit 0
 
   # From here on every failure denies.
+  trap guard_exit EXIT
   trap 'deny "internal error"' ERR
   # shellcheck source=../skills/quill/scripts/lib/common.sh
   source "$GUARD_DIR/../skills/quill/scripts/lib/common.sh"

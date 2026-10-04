@@ -42,6 +42,15 @@ _modules() {
   done <"$changed" | sort -u
 }
 
+# _go_packages <changed file>: the directory of each changed .go file, unique.
+# (A function, not inline: bash 3.2 can't parse a case inside $(...).)
+_go_packages() {
+  local p
+  grep '\.go$' "$1" | while IFS= read -r p; do
+    case "$p" in */*) printf '%s\n' "${p%/*}" ;; *) printf '.\n' ;; esac
+  done | sort -u
+}
+
 test_plan() {
   local gd="$1" head="$2" changed="$3" repo="$4" cfg="$5" tree mods system image cmd
   tree="$(mktemp "${TMPDIR:-/tmp}/quill-tree.XXXXXX")" || return 1
@@ -71,9 +80,7 @@ test_plan() {
   elif grep -qx 'go.mod' "$tree"; then
     system=go
     # Go packages are directories: test each one a changed .go file is in.
-    mods="$(grep '\.go$' "$changed" | while IFS= read -r p; do
-      case "$p" in */*) printf '%s\n' "${p%/*}" ;; *) printf '.\n' ;; esac
-    done | sort -u)"
+    mods="$(_go_packages "$changed")"
     [ -n "$mods" ] || mods="."
     image="golang:1"
     cmd="go test$(printf '%s\n' "$mods" | while IFS= read -r p; do

@@ -18,6 +18,7 @@
 QUILL_HISTORY_BATCH="${QUILL_HISTORY_BATCH:-10}"
 
 # The rule for splicing a {repo, login} pair into a query (jq).
+# shellcheck disable=SC2016 # a jq program: its $n is jq's, not the shell's
 HISTORY_VALID_JQ='def valid: (.repo | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$"))
   and ((.repo | split("/")[1]) as $n | $n != "." and $n != "..")
   and (.login | type == "string" and test("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"));'

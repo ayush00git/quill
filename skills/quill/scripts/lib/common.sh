@@ -44,6 +44,57 @@ quill_home() {
   esac
 }
 
+# require_run_dir <dir>: prints the run directory as an absolute path in
+# quill_home's form; it must be $QUILL_HOME/reviews/<YYYY-MM-DD>/.run/<id>. Scripts
+# are allowed to run without a prompt, so each one confines the paths it's
+# given instead of trusting its caller. Creates the directory if needed.
+require_run_dir() {
+  local given="$1" home abs p pr r rel date dotrun id rest
+  [ -n "$given" ] || die "no run directory given"
+  [ -d "$(quill_home)" ] || die "no workspace at $(quill_home) (run init.sh first)"
+  home="$(resolve_path "$(quill_home)")" || die "can't resolve the workspace"
+  case "$given" in /*) abs="$given" ;; *) abs="$PWD/$given" ;; esac
+  case "/$abs/" in
+    */../* | */./*) die "the run directory can't contain . or .. segments: $given" ;;
+  esac
+  case "$abs" in
+    "$home/reviews/"* | "$(quill_home)/reviews/"*) ;;
+    *) die "the run directory must be inside $home/reviews: $given" ;;
+  esac
+  # Before creating anything, the deepest part that already exists must
+  # resolve inside the workspace, so a planted symlink can't make mkdir
+  # write outside it.
+  p="$abs"
+  while [ ! -e "$p" ] && [ "$p" != / ]; do p="$(dirname "$p")"; done
+  pr="$(resolve_path "$p")" || die "can't resolve the run directory: $given"
+  case "$pr" in
+    "$home" | "$home/reviews" | "$home/reviews/"*) ;;
+    *) die "the run directory resolves outside $home/reviews: $given" ;;
+  esac
+  mkdir -p "$abs" || die "can't create the run directory: $given"
+  r="$(resolve_path "$abs")" || die "can't resolve the run directory: $given"
+  case "$r" in
+    "$home/reviews/"*) ;;
+    *) die "the run directory resolves outside $home/reviews: $given" ;;
+  esac
+  rel="${r#"$home/reviews/"}"
+  IFS=/ read -r date dotrun id rest <<<"$rel"
+  case "$date" in
+    [0123456789][0123456789][0123456789][0123456789]-[0123456789][0123456789]-[0123456789][0123456789]) ;;
+    *) die "the run directory must look like reviews/<YYYY-MM-DD>/.run/<id>: $given" ;;
+  esac
+  if [ "$dotrun" != ".run" ] || [ -z "$id" ] || [ -n "$rest" ]; then
+    die "the run directory must look like reviews/<YYYY-MM-DD>/.run/<id>: $given"
+  fi
+  case "$id" in
+    .* | *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*)
+      die "the run id may only use letters, digits, . _ and -: $id" ;;
+  esac
+  # Checked on the resolved path, printed in the same form as every other
+  # path built from quill_home, so task.json never mixes the two.
+  printf '%s/reviews/%s\n' "$(quill_home)" "$rel"
+}
+
 # --- config ----------------------------------------------------------------
 
 # config_json: defaults.json deep-merged with <workspace>/config.json (objects

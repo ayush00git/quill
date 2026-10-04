@@ -48,7 +48,7 @@ main() {
   done
   [ -n "$run_dir" ] || usage
   require_cmd gh jq
-  mkdir -p "$run_dir"
+  run_dir="$(require_run_dir "$run_dir")" || exit 1
 
   local viewer items
   viewer="$(viewer_login)"

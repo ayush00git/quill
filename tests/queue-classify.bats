@@ -201,10 +201,10 @@ me
 JSON
   gh_respond_with 'api graphql *' fake-graphql-prs
   jq -n --arg h "$HEAD" '{version: 1, prs: {"apache/foo#1": {reviewedHeadSha: $h}}}' >"$QUILL_HOME/state.json"
-  run "$SCRIPTS/queue.sh" --run-dir "$TEST_TMP/run" --pr apache/foo#1
+  run "$SCRIPTS/queue.sh" --run-dir "$QUILL_HOME/reviews/2026-10-04/.run/t1" --pr apache/foo#1
   [ "$status" -eq 0 ]
   [ "$output" = "queue: 1 open PR(s): 0 to review (0 re-reviews), 1 unchanged since the last draft, 0 waiting on author, 0 skipped" ]
-  run "$SCRIPTS/queue.sh" --run-dir "$TEST_TMP/run" --pr apache/foo#1 --force
+  run "$SCRIPTS/queue.sh" --run-dir "$QUILL_HOME/reviews/2026-10-04/.run/t1" --pr apache/foo#1 --force
   [ "$output" = "queue: 1 open PR(s): 1 to review (0 re-reviews), 0 unchanged since the last draft, 0 waiting on author, 0 skipped" ]
   teardown_tmp
 }

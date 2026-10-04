@@ -274,6 +274,7 @@ main() {
   [ -n "$run_dir" ] || usage
   [ -n "$slug" ] || [ "$all" = true ] || usage
   require_cmd git jq
+  run_dir="$(require_run_dir "$run_dir")" || exit 1
   [ -d "$run_dir/ctx" ] || die "no context bundles in $run_dir (run prepare.sh first)"
 
   if [ "$all" = true ]; then

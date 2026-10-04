@@ -99,7 +99,8 @@ JSON
   : >"$GH_STUB_LOG"
   run "$SCRIPTS/queue.sh" --run-dir "$RUN" --repo apache/foo
   [ "$status" -eq 0 ]
-  run grep -c '^api graphql' "$GH_STUB_LOG"
+  # PR detail batches only (the author history lookup is a separate query)
+  run grep -c '^api graphql --method POST -f query=query(\$me' "$GH_STUB_LOG"
   [ "$output" = "2" ]
   run jq -c '[.items[] | [.number, .title]]' "$RUN/queue.json"
   [ "$output" = '[[3,"PR 3"],[5,"PR 5"],[9,"PR 9"]]' ]

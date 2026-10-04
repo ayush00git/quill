@@ -49,6 +49,10 @@ jobs:
           jq --version
           gh --version | head -1
       - name: bats
+        env:
+          # The real-container sandbox test (tests/run-tests.bats) needs a
+          # container runtime; only the Linux runners have Docker.
+          QUILL_TEST_CONTAINER: ${{ runner.os == 'Linux' && 'docker' || '' }}
         run: '"$RUNNER_TEMP/bats/bin/bats" --print-output-on-failure tests'
 
   plugin-validate:

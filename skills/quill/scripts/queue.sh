@@ -10,7 +10,8 @@
 # where each item has {repo, number, url, sources} plus the PR details from
 # lib/normalize.jq (title, author, base/head, size, files, CI, reviews, ...)
 # the ball-in-court verdict from lib/classify.jq (court, needsReview, ...) and
-# the effective size from lib/size.jq (effectiveSize, sizeClass).
+# the effective size from lib/size.jq (effectiveSize, sizeClass) and the
+# competing-PR groups from lib/group.jq (issueKeys, group, groupMembers).
 # --force marks every PR in my court for review even if quill already drafted
 # a review for its current head.
 # and prints a one-line summary. Repos come from --repo (repeatable) plus
@@ -87,8 +88,9 @@ main() {
     --slurpfile cfg "$run_dir/config.effective.json" --slurpfile state "$state_file" '
     include "classify";
     include "size";
+    include "group";
     {version: 1, generatedAt: $at, viewer: $viewer,
-     items: map(classify($viewer; $cfg[0]; $state[0]; $force) | effective_size($cfg[0]))}' "$run_dir/enriched.json" |
+     items: (map(classify($viewer; $cfg[0]; $state[0]; $force) | effective_size($cfg[0])) | group_items($cfg[0]))}' "$run_dir/enriched.json" |
     write_atomic "$run_dir/queue.json"
   rm -f "$run_dir/candidates.json" "$run_dir/enriched.json" "$run_dir/config.effective.json"
 

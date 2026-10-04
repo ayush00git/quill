@@ -185,18 +185,24 @@ save_one() {
     jq -c --arg r "$1" '{pr, slug, status: "rejected", reason: $r}' "$task"
     rm -rf "$tmp"
   }
+  # The report itself broke the contract: move it aside, because capture.sh
+  # keeps the first report it sees and a retried reviewer must get through.
+  reject_report() {
+    mv -f "$raw" "$ctx/output.rejected.raw" 2>/dev/null || true
+    reject "$1"
+  }
 
   if ! err="$(split_report "$raw" "$(jq -r .nonce "$task")" "$tmp" 2>&1)"; then
     [ -n "$err" ] || err="the report does not follow the output contract"
-    reject "$err"
+    reject_report "$err"
     return 0
   fi
   if ! err="$(check_summary "$tmp/summary.json" "$task" 2>&1 >"$tmp/summary.norm.json")"; then
-    reject "$(printf '%s' "$err" | sed -e 's/^jq: error ([^)]*): //' | head -1)"
+    reject_report "$(printf '%s' "$err" | sed -e 's/^jq: error ([^)]*): //' | head -1)"
     return 0
   fi
   if ! err="$(check_review "$tmp/review.md" "$tmp/summary.norm.json" 2>&1 >"$tmp/review-warnings.txt")"; then
-    reject "$(printf '%s' "$err" | sed -e 's/^jq: error ([^)]*): //' | head -1)"
+    reject_report "$(printf '%s' "$err" | sed -e 's/^jq: error ([^)]*): //' | head -1)"
     return 0
   fi
 
@@ -208,7 +214,7 @@ save_one() {
     return 0
   fi
   if ! err="$(check_comments "$tmp/comments.json" "$tmp/map.json" 2>&1 >"$tmp/comments.checked.json")"; then
-    reject "$(printf '%s' "$err" | sed -e 's/^jq: error ([^)]*): //' | head -1)"
+    reject_report "$(printf '%s' "$err" | sed -e 's/^jq: error ([^)]*): //' | head -1)"
     return 0
   fi
   jq '.kept' "$tmp/comments.checked.json" >"$tmp/comments.kept.json"

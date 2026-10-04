@@ -30,28 +30,33 @@ usage() {
 }
 
 # prepare_one <run dir> <item file>: prints one dispatch entry (JSON).
-# Runs in a subshell so a die() inside only fails this PR.
+# Runs in a subshell so a die() inside only fails this PR. errexit doesn't
+# reach into command substitutions on older bash, so every step checks.
 prepare_one() {
   local run_dir="$1" item="$2" repo number base head last gd wt mode_file ctx fetched
-  repo="$(jq -r .repo "$item")"
-  number="$(jq -r .number "$item")"
-  base="$(jq -r .base.ref "$item")"
-  head="$(jq -r .head.sha "$item")"
-  last="$(jq -r '.quillState.reviewedHeadSha // empty' "$item")"
+  repo="$(jq -r .repo "$item")" || return 1
+  number="$(jq -r .number "$item")" || return 1
+  base="$(jq -r .base.ref "$item")" || return 1
+  head="$(jq -r .head.sha "$item")" || return 1
+  last="$(jq -r '.quillState.reviewedHeadSha // empty' "$item")" || return 1
+  if [ -n "$last" ] && ! _is_sha "$last"; then
+    warn "$repo#$number: ignoring a malformed reviewedHeadSha in state.json; doing a full review"
+    last=""
+  fi
 
-  gd="$(ensure_clone "$repo")"
-  fetched="$(fetch_pr "$repo" "$number" "$base")"
+  gd="$(ensure_clone "$repo")" || return 1
+  fetched="$(fetch_pr "$repo" "$number" "$base")" || return 1
   if [ "$fetched" != "$head" ]; then
     warn "$repo#$number: head moved since the queue was built ($head -> $fetched); reviewing $fetched"
     head="$fetched"
   fi
-  wt="$(add_worktree "$repo" "$number" "$head")"
-  mode_file="$run_dir/ctx/.mode-$number-$$.json"
+  wt="$(add_worktree "$repo" "$number" "$head")" || return 1
   mkdir -p "$run_dir/ctx"
-  review_mode "$repo" "$number" "$base" "$head" "$last" >"$mode_file"
-  ctx="$(write_bundle "$run_dir" "$item" "$gd" "$wt" "$mode_file")"
+  mode_file="$run_dir/ctx/.mode-$number-$$.json"
+  review_mode "$repo" "$number" "$base" "$head" "$last" >"$mode_file" || return 1
+  ctx="$(write_bundle "$run_dir" "$item" "$gd" "$wt" "$mode_file")" || return 1
   jq -c --arg pr "$repo#$number" --arg ctx "$ctx" --arg wt "$wt" \
-    '{pr: $pr, slug: ($ctx | split("/") | last), ctxDir: $ctx, worktree: $wt, mode: .mode}' "$mode_file"
+    '{pr: $pr, slug: ($ctx | split("/") | last), ctxDir: $ctx, worktree: $wt, mode: .mode}' "$mode_file" || return 1
   rm -f "$mode_file"
 }
 

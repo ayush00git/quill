@@ -20,7 +20,7 @@ field() {
 @test "allowed-tools pre-approves quill's scripts and nothing that posts" {
   local tools
   tools="$(field allowed-tools)"
-  for s in init queue prepare save-review render-queue clean; do
+  for s in init queue prepare run-tests save-review render-queue clean; do
     [[ "$tools" == *"Bash(\${CLAUDE_SKILL_DIR}/scripts/$s.sh *)"* ]] || false
   done
   # posting is only ever the dry run; --submit always asks
@@ -31,7 +31,7 @@ field() {
   # every entry is one of quill's scripts
   local entries
   entries="$(grep -o 'Bash([^)]*)' <<<"$tools")"
-  [ "$(wc -l <<<"$entries" | tr -d ' ')" = "7" ]
+  [ "$(wc -l <<<"$entries" | tr -d ' ')" = "8" ]
   run grep -v '^Bash(${CLAUDE_SKILL_DIR}/scripts/[a-z-]*\.sh ' <<<"$entries"
   [ "$status" -eq 1 ]
 }
@@ -49,6 +49,17 @@ field() {
   submit="$(grep -n 'post.sh --submit' <<<"$post" | head -1 | cut -d: -f1)"
   [ "$dry" -lt "$stop" ]
   [ "$stop" -lt "$submit" ]
+}
+
+@test "--run-tests runs after prepare and before any reviewer starts" {
+  grep -q '^| `--run-tests` |' "$skill"
+  local prepare tests review
+  prepare="$(grep -n 'scripts/prepare.sh --run-dir RUN' "$skill" | head -1 | cut -d: -f1)"
+  tests="$(grep -n 'scripts/run-tests.sh --run-dir RUN' "$skill" | head -1 | cut -d: -f1)"
+  review="$(grep -n 'launch the `quill:pr-reviewer` subagent' "$skill" | head -1 | cut -d: -f1)"
+  [ -n "$tests" ]
+  [ "$prepare" -lt "$tests" ]
+  [ "$tests" -lt "$review" ]
 }
 
 @test "clean is reachable from the arguments" {

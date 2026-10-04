@@ -171,7 +171,8 @@ prepare_pr() {
   [[ "$output" == *"no cached clone"* ]] || false
   prepare_pr
   local bad
-  for bad in "" "HEAD" "abc123" "${HOSTILE_SHA}0" "$(printf '%s' "$HOSTILE_SHA" | tr a-f A-F)" "--orphan"; do
+  for bad in "" "HEAD" "abc123" "${HOSTILE_SHA}0" "$(printf '%s' "$HOSTILE_SHA" | tr a-f A-F)" \
+    "ABCDE0123456789ABCDE0123456789ABCDE01234" "--orphan"; do
     run add_worktree apache/foo 1 "$bad"
     [ "$status" -ne 0 ]
   done

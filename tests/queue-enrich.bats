@@ -126,10 +126,10 @@ JSON
 }
 
 @test "a failed gh call with no JSON reports gh's own error" {
-  gh_respond 'api graphql *' 1 </dev/null
+  # an executable fixture that fails the way gh does on a 401: stderr only
   printf '#!/bin/sh\necho "HTTP 401: Bad credentials" >&2\nexit 1\n' >"$GH_STUB_DIR/fail401"
   chmod +x "$GH_STUB_DIR/fail401"
-  sed -i.bak 's#^api graphql \*\t[^\t]*#api graphql *\tfail401#' "$GH_STUB_DIR/routes" && rm -f "$GH_STUB_DIR/routes.bak"
+  printf 'api graphql *\tfail401\t1\n' >>"$GH_STUB_DIR/routes"
   run "$SCRIPTS/queue.sh" --run-dir "$RUN" --pr apache/foo#1
   [ "$status" -ne 0 ]
   [[ "$output" == *"Bad credentials"* ]] || false

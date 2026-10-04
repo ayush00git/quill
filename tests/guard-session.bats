@@ -145,7 +145,12 @@ each() { # each <pass|allow|ask|deny> <cwd> <command>...
     "jq -f prog.jq state.json" \
     "jq . /etc/passwd" \
     "ls --color=always" \
-    "cat state.json | sh"
+    "cat state.json | sh" \
+    "jq -n env" \
+    "jq -n '\$ENV.GH_TOKEN'" \
+    "jq -r 'env.GH_TOKEN' state.json" \
+    "jq -n 'import \"../.config/x\" as \$d; \$d'" \
+    "jq -n 'include \"x\"; .'"
 }
 
 # --- the workspace: hard deny ---

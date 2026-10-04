@@ -467,6 +467,9 @@ readonly_args() {
     esac
     if [ "$filter" = 1 ]; then
       filter=0 # the jq program itself
+      # env / $ENV read environment secrets (GH_TOKEN), import / include
+      # read files outside the workspace: those ask instead.
+      case "$w" in *env* | *ENV* | *import* | *include*) return 1 ;; esac
       continue
     fi
     case "$w" in /*) p="$w" ;; *) p="$CWD/$w" ;; esac

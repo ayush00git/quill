@@ -146,3 +146,11 @@ main_order() { # the PR numbers of the main table, in order
   run "$SCRIPTS/render-queue.sh" --run-dir "$TEST_TMP/elsewhere"
   [ "$status" -ne 0 ]
 }
+
+@test "PR text can't add live links, images or HTML to QUEUE.md" {
+  # shellcheck disable=SC2016 # literal markdown, not expansions
+  run jq -rn -L "$SCRIPTS/lib" 'include "render";
+    "Fix ![x](https://evil.example/p.png) <img src=x> [click](http://e) `c`" | cell(200)'
+  [ "$status" -eq 0 ]
+  [ "$output" = 'Fix !\[x\](https://evil.example/p.png) &lt;img src=x&gt; \[click\](http://e) \`c\`' ]
+}

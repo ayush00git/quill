@@ -18,7 +18,7 @@ The final message is four blocks separated by marker lines. Each marker sits alo
 ```
 
 - Text before the first marker is ignored. Nothing may follow the `END` marker.
-- Markers with any other nonce are ordinary text. The nonce is how quill tells your output apart from PR text you quote, so never copy markers from anywhere except `task.json`.
+- Markers with any other nonce are ordinary text. The nonce is how quill tells your output apart from PR text you quote, so build every marker from the `nonce` in `task.json` and never copy one from anywhere else.
 - No code fences around the blocks.
 
 ## SUMMARY
@@ -63,7 +63,7 @@ A JSON array of the postable inline comments, possibly empty (`[]`). Each elemen
 
 Rules:
 
-- `line` (and `start_line`) must fall inside a hunk of the PR's diff against the merge base, on the given side. Comments outside the diff fail validation at save time and are moved into the review body at post time.
+- `line` (and `start_line`) must fall inside a hunk of the PR's diff against the merge base, on the given side. A comment outside the diff doesn't reject the review: `save-review.sh` drops it from `comments.json` and reports a warning, and the finding stays in the review file. `post.sh` checks again at post time and moves any out-of-diff comment into the pending review body.
 - Bodies never contain expected answers, contributor signals or anything from the private sections.
 - Put each issue in one comment. Don't repeat the same finding on several lines; list the other locations in the body.
 - A finding that has no line in the diff (for example a wrong issue reference) stays in the review file only.

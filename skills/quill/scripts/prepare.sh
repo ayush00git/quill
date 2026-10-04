@@ -74,6 +74,7 @@ main() {
     esac
   done
   [ -n "$run_dir" ] || usage
+  run_dir="$(require_run_dir "$run_dir")" || exit 1
   [ -f "$run_dir/queue.json" ] || die "no queue.json in $run_dir (run queue.sh first)"
   require_cmd git gh jq
 

@@ -8,7 +8,7 @@ setup() {
   use_gh_stub
   export QUILL_HOME="$TEST_TMP/ws"
   mkdir -p "$QUILL_HOME"
-  RUN="$TEST_TMP/run"
+  RUN="$QUILL_HOME/reviews/2026-10-04/.run/t1"
   gh_respond 'api --method GET user --jq .login' <<'JSON'
 me
 JSON

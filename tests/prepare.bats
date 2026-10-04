@@ -193,7 +193,10 @@ queue_with() {
 @test "usage errors" {
   run "$SCRIPTS/prepare.sh"
   [ "$status" -eq 64 ]
-  run "$SCRIPTS/prepare.sh" --run-dir "$TEST_TMP/nowhere"
+  run "$SCRIPTS/prepare.sh" --run-dir "$QUILL_HOME/reviews/2026-10-04/.run/empty"
   [ "$status" -ne 0 ]
   [[ "$output" == *"no queue.json"* ]] || false
+  run "$SCRIPTS/prepare.sh" --run-dir "$TEST_TMP/nowhere"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must be inside"* ]] || false
 }

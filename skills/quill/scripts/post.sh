@@ -4,6 +4,7 @@
 # post.sh: turn a drafted review into a pending GitHub review.
 #
 #   post.sh --dry-run <owner/repo#N | PR URL>
+#   post.sh --submit <owner/repo#N | PR URL> --sha <payload sha256>
 #
 # --dry-run builds and checks the exact request without sending it:
 #   - the PR is still open and its head is the one quill reviewed
@@ -15,8 +16,18 @@
 # It writes <workspace>/post/<slug>.json, prints the comments exactly as they
 # would be posted, and the payload's sha256.
 #
+# --submit sends that payload as a PENDING review (no "event"), visible only to
+# you until you submit it in GitHub's UI. It refuses unless:
+#   - this isn't a headless run (QUILL_HEADLESS unset) and the session runs
+#     in the workspace, where the explicit ask rule makes Claude Code ask you
+#   - that ask rule is still in the workspace settings
+#   - the payload is the one the dry run showed (same sha256)
+#   - the head, the pending-review check and the secret scan still pass
+# Only the literal words --submit and --sha are accepted.
+#
 # Exit codes: 0 ok, 3 head moved, 4 pending review exists, 5 refused
-# (secret or private text), 6 no drafted review, 1 anything else.
+# (secret or private text, or a submit precondition), 6 no drafted review,
+# 1 anything else.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,7 +39,7 @@ source "$SCRIPT_DIR/lib/repo.sh"
 source "$SCRIPT_DIR/lib/diffmap.sh"
 
 usage() {
-  sed -n '4,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '4,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 64
 }
 
@@ -121,13 +132,7 @@ dry_run() {
                   + ($outside | map("- `\(.path):\(.line)`: \(.body)") | join("\n\n")))} end)' \
     "$draft" >"$tmp/payload.json"
 
-  if jq -e --arg re "$SECRET_RE" '[.body // "", .comments[].body] | any(test($re))' "$tmp/payload.json" >/dev/null; then
-    die "refusing: the review contains something that looks like a credential; edit $draft first" 5
-  fi
-  if jq -e --arg re "$PRIVATE_RE" '[.body // "", .comments[].body] | any(test($re))' "$tmp/payload.json" >/dev/null; then
-    die "refusing: the review contains quill's private notes (expected answers or contributor signals); edit $draft first" 5
-  fi
-  jq -e 'has("event") | not' "$tmp/payload.json" >/dev/null || die "internal error: the payload would submit the review"
+  check_payload_text "$tmp/payload.json"
 
   mkdir -p "$home/post"
   local out sha
@@ -142,6 +147,90 @@ dry_run() {
     (.comments[] | "### \(.path):\(if .start_line then "\(.start_line)-" else "" end)\(.line) (\(.side))", .body, ""),
     (if .body then ("### Review body", .body, "") else empty end)' "$out"
   printf 'Payload: %s\nsha256: %s\n' "$out" "$sha"
+  printf 'To create it: post.sh --submit %s --sha %s\n' "$key" "$sha"
+}
+
+# The explicit ask rule init.sh puts in the workspace settings (see init.sh).
+POST_ASK_RULE='Bash(*post.sh*--submit*)'
+
+# check_payload_text <payload>: the secret and private-notes scan.
+check_payload_text() {
+  if jq -e --arg re "$SECRET_RE" '[.body // "", .comments[].body] | any(test($re))' "$1" >/dev/null; then
+    die "refusing: the review contains something that looks like a credential" 5
+  fi
+  if jq -e --arg re "$PRIVATE_RE" '[.body // "", .comments[].body] | any(test($re))' "$1" >/dev/null; then
+    die "refusing: the review contains quill's private notes (expected answers or contributor signals)" 5
+  fi
+  jq -e 'has("event") | not' "$1" >/dev/null || die "refusing: the payload would submit the review instead of leaving it pending" 5
+}
+
+submit() {
+  local ref="$1" want_sha="$2" parsed owner repo number key home rhome cwd out sha head me tmp
+  parsed="$(parse_pr_ref "$ref")" || exit 1
+  read -r owner repo number <<<"$parsed"
+  key="$owner/$repo#$number"
+  home="$(quill_home)"
+
+  # Never from a headless or scheduled run.
+  [ -z "${QUILL_HEADLESS:-}" ] || die "refusing: headless runs never post (QUILL_HEADLESS is set)" 5
+  # Only from a session in the workspace, where the ask rule below applies.
+  rhome="$(resolve_path "$home")" || die "can't resolve the workspace"
+  for cwd in "$PWD" "${CLAUDE_PROJECT_DIR:-$PWD}"; do
+    [ "$(resolve_path "$cwd")" = "$rhome" ] ||
+      die "refusing: run this from a Claude Code session started in $home (here: $cwd)" 5
+  done
+  # The explicit ask rule makes Claude Code ask you before this command, in
+  # every permission mode. Without it, don't post.
+  jq -e --arg r "$POST_ASK_RULE" '(.permissions.ask // []) | index($r)' "$home/.claude/settings.json" >/dev/null 2>&1 ||
+    die "refusing: $home/.claude/settings.json lacks the ask rule $POST_ASK_RULE (run init.sh)" 5
+
+  out="$home/post/$(pr_slug "$owner" "$repo" "$number").json"
+  [ -f "$out" ] || die "no payload for $key: run post.sh --dry-run $key first" 6
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/quill-post.XXXXXX")" || exit 1
+  POST_TMP="$tmp"
+  trap 'rm -rf "$POST_TMP"' EXIT
+  # Hash, scan and send one private copy, so the bytes posted are exactly the
+  # bytes whose sha256 you confirmed.
+  cp "$out" "$tmp/payload.json"
+  sha="$(sha256_file "$tmp/payload.json")"
+  [ "$sha" = "$want_sha" ] || die "refusing: the payload changed since the dry run (sha256 $sha, expected $want_sha); run --dry-run again" 5
+  check_payload_text "$tmp/payload.json"
+
+  # Re-check what may have changed since the dry run.
+  gh_json "$tmp/pr.json" "repos/$owner/$repo/pulls/$number"
+  [ "$(jq -r .state "$tmp/pr.json")" = open ] || die "$key isn't open any more; nothing posted"
+  head="$(jq -r .head.sha "$tmp/pr.json")"
+  [ "$head" = "$(jq -r .commit_id "$tmp/payload.json")" ] ||
+    die "$key moved to ${head:0:7} since the dry run; review it again with /quill:quill $key" 3
+  me="$(gh api --method GET user --jq .login)" || die "gh isn't authenticated (run: gh auth login)"
+  gh_json "$tmp/reviews.json" "repos/$owner/$repo/pulls/$number/reviews" --paginate --slurp
+  if jq -e --arg me "$me" '[add[]? | select(.state == "PENDING" and .user.login == $me)] | length > 0' \
+    "$tmp/reviews.json" >/dev/null; then
+    die "you already have a pending review on $key; submit or delete it on GitHub first" 4
+  fi
+
+  # The one GitHub write quill ever makes.
+  if ! gh api --method POST "repos/$owner/$repo/pulls/$number/reviews" --input "$tmp/payload.json" >"$tmp/resp.json" 2>"$tmp/resp.err"; then
+    die "GitHub refused the review: $(jq -r '.message // empty' "$tmp/resp.json" 2>/dev/null) $(head -1 "$tmp/resp.err")"
+  fi
+  [ "$(jq -r .state "$tmp/resp.json")" = PENDING ] ||
+    warn "GitHub reports the review as $(jq -r .state "$tmp/resp.json"), not PENDING; check it on GitHub now"
+
+  lock_acquire "$home/.state.lock" 30
+  if jq --arg k "$key" --slurpfile r "$tmp/resp.json" --arg at "$(now_iso)" --slurpfile p "$tmp/payload.json" \
+    '.prs[$k].posted = {reviewId: $r[0].id, at: $at, state: $r[0].state, url: $r[0].html_url,
+                        commitId: $p[0].commit_id, comments: ($p[0].comments | length)}' \
+    "$home/state.json" >"$tmp/state.json"; then
+    mv -f "$tmp/state.json" "$home/state.json"
+  else
+    warn "the review was created, but recording it in $home/state.json failed"
+  fi
+  lock_release "$home/.state.lock"
+  cp "$tmp/payload.json" "${out%.json}.posted.json" && rm -f "$out"
+
+  jq -r --arg key "$key" --slurpfile p "${out%.json}.posted.json" \
+    '"Created a pending review on \($key) with \($p[0].comments | length) inline comment(s). Only you can see it until you submit it on GitHub: \(.html_url)"' \
+    "$tmp/resp.json"
 }
 
 main() {
@@ -150,6 +239,11 @@ main() {
       if [ -z "${2:-}" ] || [ "$#" -ne 2 ]; then usage; fi
       require_cmd gh jq git
       dry_run "$2"
+      ;;
+    --submit)
+      if [ "$#" -ne 4 ] || [ "$3" != "--sha" ] || [ -z "$4" ]; then usage; fi
+      require_cmd gh jq
+      submit "$2" "$4"
       ;;
     -h | --help) usage ;;
     *) usage ;;

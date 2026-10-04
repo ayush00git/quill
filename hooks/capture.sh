@@ -73,20 +73,29 @@ main() {
     clog "$home/logs" "event=$event agent=$agent_id rejected: report over $CAPTURE_MAX_BYTES bytes"
     return 0
   fi
-  nonce="$(printf '%s\n' "$message" | sed -n 's/^<<<QUILL \([0-9a-f]\{32\}\) SUMMARY>>>$/\1/p' | head -1)"
-  if [ -z "$nonce" ]; then
+  # Every SUMMARY marker in order. The reviewer may quote PR text that holds a
+  # marker with some other nonce; the report belongs to the first nonce that
+  # has an END marker and a bundle, so a planted marker can't hide it.
+  local candidates c
+  candidates="$(printf '%s\n' "$message" | sed -n 's/^<<<QUILL \([0-9a-f]\{32\}\) SUMMARY>>>$/\1/p' | head -20)"
+  if [ -z "$candidates" ]; then
     # Normal for SubagentStop in auto mode: the report went through the handback.
     clog "$home/logs" "event=$event agent=$agent_id ignored: no SUMMARY marker"
     return 0
   fi
-  if ! printf '%s\n' "$message" | grep -qxF "<<<QUILL $nonce END>>>"; then
-    clog "$home/logs" "event=$event agent=$agent_id nonce=$nonce rejected: no END marker"
-    return 0
-  fi
-
-  ctx="$(find_ctx_for_nonce "$home" "$nonce")"
-  if [ -z "$ctx" ] || ! path_within "$ctx" "$home/reviews"; then
-    clog "$home/logs" "event=$event agent=$agent_id nonce=$nonce rejected: no bundle has this nonce"
+  nonce=""
+  ctx=""
+  for c in $candidates; do
+    printf '%s\n' "$message" | grep -qxF "<<<QUILL $c END>>>" || continue
+    ctx="$(find_ctx_for_nonce "$home" "$c")"
+    if [ -n "$ctx" ] && path_within "$ctx" "$home/reviews"; then
+      nonce="$c"
+      break
+    fi
+    ctx=""
+  done
+  if [ -z "$nonce" ]; then
+    clog "$home/logs" "event=$event agent=$agent_id rejected: no SUMMARY marker with an END marker and a matching bundle"
     return 0
   fi
 

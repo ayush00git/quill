@@ -62,7 +62,11 @@ pr_states() {
       rm -rf "$tmp"
       return 1
     }
-    gh api graphql --method POST -f query="$q" >"$tmp/resp-$n.json" 2>/dev/null || true
+    gh api graphql --method POST -f query="$q" >"$tmp/resp-$n.json" 2>"$tmp/err-$n.txt" || true
+    # Every PR in the batch stays UNKNOWN (and untouched) without data; say why.
+    if ! jq -e '.data | type == "object"' "$tmp/resp-$n.json" >/dev/null 2>&1; then
+      warn "couldn't get PR states from GitHub: $(jq -r '[.errors[]?.message] | join("; ")' "$tmp/resp-$n.json" 2>/dev/null || true)$(head -1 "$tmp/err-$n.txt")"
+    fi
     jq --argjson keys "$keys" --slurpfile r "$tmp/resp-$n.json" '
       . + ($keys | to_entries | map({key: .value,
         value: (($r[0].data // {})["p\(.key)"].pullRequest.state // "UNKNOWN")}) | from_entries)' \

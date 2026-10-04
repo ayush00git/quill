@@ -83,11 +83,14 @@ teardown() {
   [ -e "$QUILL_HOME/.agents/new" ]
 }
 
-@test "if GitHub can't be reached, nothing is removed" {
+@test "if GitHub can't be reached, nothing is removed, and gh's reason is shown" {
   : >"$GH_STUB_DIR/routes"
-  gh_respond 'api graphql *' 1 </dev/null
+  printf '#!/bin/sh\necho "HTTP 401: Bad credentials" >&2\nexit 1\n' >"$GH_STUB_DIR/fail401"
+  chmod +x "$GH_STUB_DIR/fail401"
+  printf 'api graphql *\tfail401\t1\n' >>"$GH_STUB_DIR/routes"
   run "$SCRIPTS/clean.sh"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"couldn't get PR states from GitHub: HTTP 401: Bad credentials"* ]] || false
   [[ "$output" == *"removed 0 closed or merged PR(s), kept 0 open, 4 unknown"* ]] || false
   [ -d "$QUILL_HOME/worktrees/apache__foo__2" ]
   [ "$(jq '.prs | length' "$QUILL_HOME/state.json")" = "4" ]

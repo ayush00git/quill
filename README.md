@@ -110,7 +110,7 @@ With `--run-tests`, each PR's affected tests run in a throwaway container:
 | `skipBots` | `true` | leave out PRs from bots |
 | `skipAuthors` | `[]` | leave out PRs from these logins |
 | `smallPrLines`, `largePrLines` | `200`, `500` | size classes, after discounting generated files |
-| `generatedPatterns` | lockfiles, `vendor/**`, `*.pb.go`, ... | files that don't count toward size; the repo's `linguist-generated` and `linguist-vendored` attributes count too |
+| `generatedPatterns` | lockfiles, `vendor/**`, `*.pb.go`, ... | files that don't count toward size (gitignore-style patterns) |
 | `jiraProjects` | `{}` | JIRA keys per repo, for spotting competing PRs; by default the repo name in capitals |
 | `tests.runtime` | `"docker"` | `"docker"` or `"podman"` |
 | `tests.timeoutSec` | `900` | per PR |
@@ -132,7 +132,7 @@ A pull request is untrusted input, and quill hands it to an AI agent. The design
 
 Residual risks:
 
-- The clones are blob-less, so a reviewer reading older history can make git fetch file contents from GitHub on demand. That's a read of the PR's own repo, without your gh credentials, and nothing else.
+- The clones are blob-less, so a reviewer reading older history can make git fetch file contents from GitHub on demand. That's a read of the PR's own repo and nothing else. For a private repo, git answers GitHub with your usual git credentials for github.com.
 - The reviewer still reads attacker-written text. The hook decides what it can do, not what it concludes. A PR can mislead a review, so read the review as a draft.
 - The hooks and rules are defense in depth around Claude Code's own permission system, not a replacement for it. Keep quill's workspace separate from your other projects.
 

@@ -147,6 +147,26 @@ tests_json() { jq -r "$1" "$CTX/tests.json"; }
   grep -q '^kill quill-test-apache__foo__1-' "$DOCKER_STUB_DIR/calls"
 }
 
+@test "a container that doesn't exist yet at the deadline is still killed once it does" {
+  prepared_run
+  printf '%s\n' '{"tests": {"timeoutSec": 1, "repos": {"apache/foo": {"image": "busybox", "command": "sleep 60"}}}}' >"$QUILL_HOME/config.json"
+  local start=$SECONDS
+  DOCKER_STUB_KILL_MISSES=2 DOCKER_STUB_SLEEP=30 run "$SCRIPTS/run-tests.sh" --run-dir "$RUN"
+  [ "$status" -eq 0 ]
+  [ "$(tests_json .status)" = "timed out" ]
+  [ $((SECONDS - start)) -lt 15 ]
+  [ "$(grep -c '^kill quill-test-apache__foo__1-' "$DOCKER_STUB_DIR/calls")" -ge 3 ]
+}
+
+@test "a run whose output passes tests.maxLogBytes is stopped" {
+  prepared_run
+  printf '%s\n' '{"tests": {"maxLogBytes": 1000, "repos": {"apache/foo": {"image": "busybox", "command": "yes"}}}}' >"$QUILL_HOME/config.json"
+  DOCKER_STUB_SPAM=5000 DOCKER_STUB_SLEEP=30 run "$SCRIPTS/run-tests.sh" --run-dir "$RUN"
+  [ "$status" -eq 0 ]
+  [ "$(tests_json .status)" = "output too large" ]
+  grep -q '^kill quill-test-apache__foo__1-' "$DOCKER_STUB_DIR/calls"
+}
+
 @test "tests.network none and resource limits come from config" {
   prepared_run
   printf '%s\n' '{"tests": {"network": "none", "memory": "2g", "cpus": 1, "repos": {"apache/foo": {"image": "busybox", "command": "true"}}}}' >"$QUILL_HOME/config.json"
@@ -188,7 +208,7 @@ tests_json() { jq -r "$1" "$CTX/tests.json"; }
   PATH="${PATH#"$REPO_ROOT/tests/helpers/docker-stub:"}"
   # shellcheck disable=SC2016 # runs inside the container
   jq -n --arg rt "$QUILL_TEST_CONTAINER" '{tests: {runtime: $rt, timeoutSec: 300, repos: {"apache/foo": {image: "docker.io/library/busybox:latest",
-    command: "test -f src/a.go && test ! -e /root/.ssh && test -z \"${GH_TOKEN:-}\" && test \"$HOME\" = /tmp/home && echo sandbox-ok"}}}}' \
+    command: "test -f src/a.go && test ! -e /root/.ssh && test -z \"${GH_TOKEN:-}\" && test \"$HOME\" = /tmp/home && grep -q \"^CapEff:.0000000000000000\" /proc/self/status && grep -q \"^NoNewPrivs:.1\" /proc/self/status && echo sandbox-ok"}}}}' \
     >"$QUILL_HOME/config.json"
   # the runtime keeps its images under the real home (rootless podman would
   # otherwise create a store under the test's HOME that rm can't delete)

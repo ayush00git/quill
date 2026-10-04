@@ -7,8 +7,10 @@
 #   run    saves the tar from stdin's file list to $DOCKER_STUB_DIR/tarlist,
 #          the environment it would pass to env.txt, sleeps
 #          $DOCKER_STUB_SLEEP seconds, prints "test output", exits
-#          $DOCKER_STUB_EXIT (default 0)
-#   kill   kills the sleeping run
+#          $DOCKER_STUB_EXIT (default 0); with $DOCKER_STUB_SPAM it first
+#          writes that many bytes of output
+#   kill   kills the sleeping run; the first $DOCKER_STUB_KILL_MISSES kills
+#          find no container (as while the image is still being pulled)
 set -u
 d="${DOCKER_STUB_DIR:?}"
 printf '%s\n--\n' "$*" >>"$d/calls"
@@ -22,12 +24,19 @@ case "${1:-}" in
   run)
     tar -t >"$d/tarlist" 2>/dev/null
     echo $$ >"$d/run.pid"
+    if [ -n "${DOCKER_STUB_SPAM:-}" ]; then head -c "$DOCKER_STUB_SPAM" /dev/zero | tr '\0' x; fi
     sleep "${DOCKER_STUB_SLEEP:-0}" &
     wait $!
     echo "test output"
     exit "${DOCKER_STUB_EXIT:-0}"
     ;;
   kill)
+    misses="$(cat "$d/kill-misses" 2>/dev/null || echo "${DOCKER_STUB_KILL_MISSES:-0}")"
+    if [ "$misses" -gt 0 ]; then
+      echo $((misses - 1)) >"$d/kill-misses"
+      echo "Error: No such container" >&2
+      exit 1
+    fi
     [ -f "$d/run.pid" ] && kill "$(cat "$d/run.pid")" 2>/dev/null
     exit 0
     ;;

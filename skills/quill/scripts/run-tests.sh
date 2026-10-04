@@ -18,7 +18,8 @@
 #   {status: passed|failed|timed out|not run, reason?, command?, exitCode?,
 #    durationSec?, logTail?}
 # and the full log to <run-dir>/tests/<slug>.log. No container runtime means
-# "not run" with the reason, never "passed".
+# "not run" with the reason, never "passed". A run whose output passes
+# tests.maxLogBytes (default 50 MB) is stopped, so a PR can't fill the disk.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,7 +59,7 @@ runtime_ready() {
 
 # run_one <run dir> <slug> <config file> <runtime>
 run_one() {
-  local run_dir="$1" slug="$2" cfg="$3" rt="$4" ctx task repo head mb gd plan name log start rc status timeout pid wd
+  local run_dir="$1" slug="$2" cfg="$3" rt="$4" ctx task repo head mb gd plan name log start rc status timeout pid wd maxlog
   ctx="$run_dir/ctx/$slug"
   task="$ctx/task.json"
   [ -f "$task" ] || { warn "no task.json for $slug"; return 0; }
@@ -85,6 +86,7 @@ run_one() {
   log="$run_dir/tests/$slug.log"
   name="quill-test-$slug-$$"
   timeout="$(jq -r '.tests.timeoutSec // 900' "$cfg")"
+  maxlog="$(jq -r '.tests.maxLogBytes // 52428800' "$cfg")"
   local -a argv
   argv=("$rt" run --rm -i --name "$name"
     --network "$(jq -r '.tests.network // "bridge"' "$cfg")"
@@ -98,16 +100,25 @@ run_one() {
   # git archive streams the PR tree; info/attributes keeps export-ignore off.
   qgit_net --git-dir="$gd" archive --format=tar "$head" | "${argv[@]}" >"$log" 2>&1 &
   pid=$!
-  # macOS has no timeout(1): a watchdog kills the container instead.
+  # macOS has no timeout(1): a watchdog kills the container instead. It keeps
+  # trying until the run ends: at the deadline the container may not exist
+  # yet (the image still pulling), and a single kill would then miss it.
   (
     i=0
-    while [ "$i" -lt "$timeout" ]; do
+    stop=""
+    while kill -0 "$pid" 2>/dev/null; do
+      if [ -z "$stop" ]; then
+        if [ "$i" -ge "$timeout" ]; then
+          stop=timedout
+        elif [ "$(wc -c <"$log" 2>/dev/null | tr -d ' ')" -gt "$maxlog" ]; then
+          stop=toolong
+        fi
+        [ -z "$stop" ] || : >"$log.$stop"
+      fi
+      [ -z "$stop" ] || "$rt" kill "$name" >/dev/null 2>&1 || true
       sleep 1
-      kill -0 "$pid" 2>/dev/null || exit 0
       i=$((i + 1))
     done
-    : >"$log.timedout"
-    "$rt" kill "$name" >/dev/null 2>&1 || true
   ) &
   wd=$!
   rc=0
@@ -118,6 +129,9 @@ run_one() {
   if [ -e "$log.timedout" ]; then
     status="timed out"
     rm -f "$log.timedout"
+  elif [ -e "$log.toolong" ]; then
+    status="output too large"
+    rm -f "$log.toolong"
   elif [ "$rc" -eq 0 ]; then
     status=passed
   else

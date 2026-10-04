@@ -22,7 +22,10 @@ def issue_keys($cfg):
   | ((.title // "") + "\n" + (.body // "")) as $text
   | (
       [(.linkedIssues // [])[] | select(.repo == $repo) | "#\(.number)"]
-      + [$text | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s*:?\\s+#([0-9]+)\\b") | "#" + .[0]]
+      # The separator is "fixes: #N" or "fixes #N", matched with possessive
+      # quantifiers: \s*:?\s+ backtracks quadratically on a long run of
+      # spaces, and the body is the PR author's text.
+      + [$text | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)(?:\\s*+:\\s*+|\\s++)#([0-9]+)\\b") | "#" + .[0]]
       + [$text | scan("https://github\\.com/" + ($repo | gsub("\\."; "\\.")) + "/issues/([0-9]+)\\b") | "#" + .[0]]
       + [$text | scan("\\b([A-Z][A-Z0-9_]+)-([0-9]+)\\b") | select(.[0] as $p | $projects | index($p)) | "\(.[0])-\(.[1])"]
       + [(.title // "") | scan("\\[([A-Z][A-Z0-9_]+-[0-9]+)\\]") | .[0]]

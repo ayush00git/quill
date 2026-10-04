@@ -37,14 +37,6 @@ discover_reviewed() {
   _search_candidates reviewed-by --reviewed-by=@me
 }
 
-# valid_repo <owner/name>: GitHub owner and repository name rules.
-valid_repo() {
-  local re='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$'
-  [[ "$1" =~ $re ]] || return 1
-  case "${1#*/}" in . | ..) return 1 ;; esac
-  return 0
-}
-
 # discover_repo <owner/name>: every open, non-draft PR in a repo I watch.
 # New contributors often never request a reviewer, so during busy periods
 # (GSoC) these are the PRs that would otherwise be missed.

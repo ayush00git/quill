@@ -60,3 +60,38 @@ gh_respond_with() {
 gh_calls() {
   grep -c '^--$' "$GH_STUB_LOG" || true
 }
+
+# use_git_sandbox: isolate git from the developer's config and identity.
+use_git_sandbox() {
+  export HOME="$TEST_TMP/home"
+  mkdir -p "$HOME"
+  export GIT_CONFIG_NOSYSTEM=1
+  export GIT_AUTHOR_NAME="Test Author" GIT_AUTHOR_EMAIL="author@example.com"
+  export GIT_COMMITTER_NAME="Test Committer" GIT_COMMITTER_EMAIL="committer@example.com"
+  git config --global init.defaultBranch main
+  git config --global protocol.file.allow always
+}
+
+# make_remote <owner/repo>: a bare "GitHub" repo at
+# $TEST_TMP/remotes/<owner>/<repo>.git with main and a PR at
+# refs/pull/1/head. Prints the PR head SHA. Point quill at it with
+# QUILL_GIT_BASE_URL="file://$TEST_TMP/remotes" (set by the caller, since
+# this usually runs in a command substitution).
+make_remote() {
+  local src="$TEST_TMP/src-${1//\//-}" remote="$TEST_TMP/remotes/$1.git"
+  mkdir -p "$src" "$(dirname "$remote")"
+  git init -q "$src"
+  printf 'hello\n' >"$src/README.md"
+  mkdir -p "$src/src"
+  printf 'package a\n' >"$src/src/a.go"
+  git -C "$src" add -A
+  git -C "$src" commit -q -m "base"
+  git -C "$src" checkout -q -b pr
+  printf 'package a\n\nfunc F() {}\n' >"$src/src/a.go"
+  git -C "$src" commit -q -am "change a.go"
+  git init -q --bare "$remote"
+  git -C "$remote" config uploadpack.allowFilter true
+  git -C "$remote" config uploadpack.allowAnySHA1InWant true
+  git -C "$src" push -q "$remote" main "pr:refs/pull/1/head"
+  git -C "$src" rev-parse pr
+}

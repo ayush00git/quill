@@ -83,6 +83,14 @@ parse_pr_ref() {
   fi
 }
 
+# valid_repo <owner/name>: GitHub owner and repository name rules.
+valid_repo() {
+  local re='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$'
+  [[ "$1" =~ $re ]] || return 1
+  case "${1#*/}" in . | ..) return 1 ;; esac
+  return 0
+}
+
 # pr_slug <owner> <repo> <N>: owner__repo__N, the file-name form used everywhere.
 pr_slug() {
   printf '%s__%s__%s\n' "$1" "$2" "$3"

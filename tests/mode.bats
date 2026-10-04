@@ -129,4 +129,8 @@ mode_of() { # mode_of <head> [last] -> "mode|diff|rangeDiff|lastReviewed"
   [ "$status" -ne 0 ]
   run mark_reviewed apache/foo 1 "refs/heads/main"
   [ "$status" -ne 0 ]
+  # uppercase hex without F: a [0-9a-f] range accepts it under bash 3.2's
+  # locale collation (a A b B ... f), so the check must list the characters
+  run mark_reviewed apache/foo 1 "ABCDE0123456789ABCDE0123456789ABCDE01234"
+  [ "$status" -ne 0 ]
 }

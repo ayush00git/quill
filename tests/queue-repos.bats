@@ -12,6 +12,7 @@ setup() {
   gh_respond 'api --method GET user --jq .login' <<'JSON'
 me
 JSON
+  gh_respond_with 'api graphql *' fake-graphql-prs
   gh_respond 'search prs --review-requested=@me *' <<'JSON'
 [{"number": 7, "repository": {"nameWithOwner": "apache/foo"}, "url": "https://github.com/apache/foo/pull/7"}]
 JSON

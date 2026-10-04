@@ -6,7 +6,9 @@
 #   queue.sh --run-dir <dir> [--repo owner/name]... [--pr <owner/repo#N | PR URL>]
 #
 # Writes <run-dir>/queue.json:
-#   {version: 1, generatedAt, viewer, items: [{repo, number, url, sources}]}
+#   {version: 1, generatedAt, viewer, items: [...]}
+# where each item has {repo, number, url, sources} plus the PR details from
+# lib/normalize.jq (title, author, base/head, size, files, CI, reviews, ...).
 # and prints a one-line summary. Repos come from --repo (repeatable) plus
 # config.json "repos". With --pr, the queue is just that PR.
 set -euo pipefail
@@ -16,6 +18,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 # shellcheck source=lib/discover.sh
 source "$SCRIPT_DIR/lib/discover.sh"
+# shellcheck source=lib/enrich.sh
+source "$SCRIPT_DIR/lib/enrich.sh"
 
 usage() {
   sed -n '4,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
@@ -67,9 +71,13 @@ main() {
     items="$(merge_candidates "$requested" "$reviewed" "$watched")"
   fi
 
-  jq -n --arg at "$(now_iso)" --arg viewer "$viewer" --argjson items "$items" \
-    '{version: 1, generatedAt: $at, viewer: $viewer, items: $items}' |
+  printf '%s\n' "$items" | write_atomic "$run_dir/candidates.json"
+  enrich_items "$run_dir/candidates.json" "$viewer" "$run_dir/enriched.json"
+
+  jq --arg at "$(now_iso)" --arg viewer "$viewer" \
+    '{version: 1, generatedAt: $at, viewer: $viewer, items: .}' "$run_dir/enriched.json" |
     write_atomic "$run_dir/queue.json"
+  rm -f "$run_dir/candidates.json" "$run_dir/enriched.json"
 
   jq -r '"queue: \(.items | length) open PR(s) found"
     + " (review requested: \([.items[] | select(.sources | index("review-requested"))] | length),"

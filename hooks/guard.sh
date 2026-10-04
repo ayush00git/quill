@@ -270,13 +270,17 @@ DENIED_LONG='--output --ext-diff --textconv --no-index --contents --ignore-revs-
 --config-env --show-signature --help'
 
 check_git_token() {
-  local sub="$1" t="$2" name d flags
-  case "$t" in
-    /* | '~'*) deny "absolute paths are only allowed right after -C: $t" ;;
-  esac
-  case "$t" in
-    .. | ../* | */.. | *'/../'* | *=/* | *'=~'*) deny "paths must stay inside the worktree: $t" ;;
-  esac
+  local sub="$1" t="$2" pattern="${3:-0}" name d flags
+  # A pattern value (see is_pattern_option) skips only the path rules: git
+  # reads it as a regex, not a file. The denied-option list still applies.
+  if [ "$pattern" != 1 ]; then
+    case "$t" in
+      /* | '~'*) deny "absolute paths are only allowed right after -C: $t" ;;
+    esac
+    case "$t" in
+      .. | ../* | */.. | *'/../'* | *=/* | *'=~'*) deny "paths must stay inside the worktree: $t" ;;
+    esac
+  fi
   case "$t" in
     --*)
       name="${t%%=*}"
@@ -307,6 +311,22 @@ check_git_token() {
       ;;
   esac
   return 0
+}
+
+# pattern_option <sub> <token>: prints "next" when the token is an option
+# whose value is the following token and is a pattern (not a path), "self"
+# when the value is attached to the token, nothing otherwise. Only the forms
+# git really reads as patterns: grep -e; log/show -G, -S, --grep, --author,
+# --committer; diff -G, -S. (blame -S is a file and stays a path.)
+pattern_option() {
+  case "$1:$2" in
+    grep:-e | log:-G | log:-S | log:--grep | log:--author | log:--committer | \
+      show:-G | show:-S | show:--grep | show:--author | show:--committer | diff:-G | diff:-S)
+      echo next ;;
+    grep:-e?* | log:-G?* | log:-S?* | show:-G?* | show:-S?* | diff:-G?* | diff:-S?* | \
+      log:--grep=* | log:--author=* | log:--committer=* | show:--grep=* | show:--author=* | show:--committer=*)
+      echo self ;;
+  esac
 }
 
 check_bash() {
@@ -349,8 +369,20 @@ check_bash() {
     *) deny "git $sub is not allowed; use diff, log, show, blame, range-diff or grep" ;;
   esac
   i=$((i + 1))
+  local kind
   while [ "$i" -lt "${#TOKENS[@]}" ]; do
-    check_git_token "$sub" "${TOKENS[$i]}"
+    kind="$(pattern_option "$sub" "${TOKENS[$i]}")"
+    case "$kind" in
+      next)
+        check_git_token "$sub" "${TOKENS[$i]}"
+        i=$((i + 1))
+        # exactly one value token is a pattern; everything after is checked as usual
+        [ "$i" -lt "${#TOKENS[@]}" ] || deny "${TOKENS[$((i - 1))]} needs a value"
+        check_git_token "$sub" "${TOKENS[$i]}" 1
+        ;;
+      self) check_git_token "$sub" "${TOKENS[$i]}" 1 ;;
+      *) check_git_token "$sub" "${TOKENS[$i]}" ;;
+    esac
     i=$((i + 1))
   done
   return 0

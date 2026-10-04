@@ -3,12 +3,15 @@
 #
 # queue.sh: build the review queue for one run.
 #
-#   queue.sh --run-dir <dir> [--repo owner/name]... [--pr <owner/repo#N | PR URL>]
+#   queue.sh --run-dir <dir> [--repo owner/name]... [--pr <owner/repo#N | PR URL>] [--force]
 #
 # Writes <run-dir>/queue.json:
 #   {version: 1, generatedAt, viewer, items: [...]}
 # where each item has {repo, number, url, sources} plus the PR details from
-# lib/normalize.jq (title, author, base/head, size, files, CI, reviews, ...).
+# lib/normalize.jq (title, author, base/head, size, files, CI, reviews, ...)
+# and the ball-in-court verdict from lib/classify.jq (court, needsReview, ...).
+# --force marks every PR in my court for review even if quill already drafted
+# a review for its current head.
 # and prints a one-line summary. Repos come from --repo (repeatable) plus
 # config.json "repos". With --pr, the queue is just that PR.
 set -euo pipefail
@@ -27,7 +30,7 @@ usage() {
 }
 
 main() {
-  local run_dir="" pr_ref="" repos="[]"
+  local run_dir="" pr_ref="" repos="[]" force=false
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --run-dir) run_dir="${2:-}"; shift 2 || usage ;;
@@ -38,6 +41,7 @@ main() {
         shift 2
         ;;
       --pr) pr_ref="${2:-}"; shift 2 || usage ;;
+      --force) force=true; shift ;;
       -h | --help) usage ;;
       *) die "unknown argument: $1 (see --help)" 64 ;;
     esac
@@ -74,15 +78,25 @@ main() {
   printf '%s\n' "$items" | write_atomic "$run_dir/candidates.json"
   enrich_items "$run_dir/candidates.json" "$viewer" "$run_dir/enriched.json"
 
-  jq --arg at "$(now_iso)" --arg viewer "$viewer" \
-    '{version: 1, generatedAt: $at, viewer: $viewer, items: .}' "$run_dir/enriched.json" |
+  local state_file
+  state_file="$(quill_home)/state.json"
+  [ -f "$state_file" ] || state_file="$QUILL_LIB_DIR/empty-state.json"
+  config_json >"$run_dir/config.effective.json"
+  jq -L "$QUILL_LIB_DIR" --arg at "$(now_iso)" --arg viewer "$viewer" --argjson force "$force" \
+    --slurpfile cfg "$run_dir/config.effective.json" --slurpfile state "$state_file" '
+    include "classify";
+    {version: 1, generatedAt: $at, viewer: $viewer,
+     items: map(classify($viewer; $cfg[0]; $state[0]; $force))}' "$run_dir/enriched.json" |
     write_atomic "$run_dir/queue.json"
-  rm -f "$run_dir/candidates.json" "$run_dir/enriched.json"
+  rm -f "$run_dir/candidates.json" "$run_dir/enriched.json" "$run_dir/config.effective.json"
 
-  jq -r '"queue: \(.items | length) open PR(s) found"
-    + " (review requested: \([.items[] | select(.sources | index("review-requested"))] | length),"
-    + " reviewed before: \([.items[] | select(.sources | index("reviewed-by"))] | length),"
-    + " in watched repos: \([.items[] | select(.sources | index("repo"))] | length))"' \
+  jq -r '
+    def n(f): [.items[] | select(f)] | length;
+    "queue: \(.items | length) open PR(s): \(n(.needsReview)) to review"
+    + " (\(n(.needsReview and .reReview)) re-reviews),"
+    + " \(n(.court == "mine" and (.needsReview | not))) unchanged since the last draft,"
+    + " \(n(.court == "waiting_on_author")) waiting on author,"
+    + " \(n(.court == "skip")) skipped"' \
     "$run_dir/queue.json"
 }
 

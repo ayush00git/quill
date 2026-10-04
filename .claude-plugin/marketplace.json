@@ -1,0 +1,16 @@
+{
+  "name": "quill",
+  "description": "Marketplace for quill, a maintainer PR review plugin for Claude Code.",
+  "owner": {
+    "name": "ayush00git",
+    "url": "https://github.com/ayush00git"
+  },
+  "plugins": [
+    {
+      "name": "quill",
+      "source": ".",
+      "description": "Maintainer PR review queue: finds the PRs waiting on you, reviews each one in an isolated worktree with a read-only subagent, and drafts pending GitHub reviews that only you can see.",
+      "category": "code-review"
+    }
+  ]
+}

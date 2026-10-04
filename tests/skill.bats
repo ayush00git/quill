@@ -20,14 +20,41 @@ field() {
 @test "allowed-tools pre-approves quill's scripts and nothing that posts" {
   local tools
   tools="$(field allowed-tools)"
-  for s in init queue prepare save-review render-queue; do
+  for s in init queue prepare save-review render-queue clean; do
     [[ "$tools" == *"Bash(\${CLAUDE_SKILL_DIR}/scripts/$s.sh *)"* ]] || false
   done
-  [[ "$tools" != *"post.sh"* ]] || false
+  # posting is only ever the dry run; --submit always asks
+  [[ "$tools" == *"Bash(\${CLAUDE_SKILL_DIR}/scripts/post.sh --dry-run *)"* ]] || false
+  [[ "$tools" != *"--submit"* ]] || false
+  [[ "$tools" != *"post.sh *"* ]] || false
   [[ "$tools" != *"gh "* ]] || false
   # every entry is one of quill's scripts
-  run sh -c "printf '%s\n' \"\$1\" | tr ' ' '\n' | grep -c '^Bash(' " _ "$tools"
-  [ "$output" = "5" ]
+  local entries
+  entries="$(grep -o 'Bash([^)]*)' <<<"$tools")"
+  [ "$(wc -l <<<"$entries" | tr -d ' ')" = "7" ]
+  run grep -v '^Bash(${CLAUDE_SKILL_DIR}/scripts/[a-z-]*\.sh ' <<<"$entries"
+  [ "$status" -eq 1 ]
+}
+
+@test "the post flow shows the dry run, ends the turn, and submits only that payload" {
+  local post
+  post="$(sed -n '/^## Post$/,/^## /p' "$skill")"
+  [[ "$post" == *'post.sh --dry-run <PR>'* ]] || false
+  [[ "$post" == *'**End your turn.**'* ]] || false
+  [[ "$post" == *'post.sh --submit <PR> --sha <sha256>'* ]] || false
+  # the dry run, then the end of the turn, then the submit
+  local dry stop submit
+  dry="$(grep -n 'post.sh --dry-run' <<<"$post" | head -1 | cut -d: -f1)"
+  stop="$(grep -n 'End your turn' <<<"$post" | head -1 | cut -d: -f1)"
+  submit="$(grep -n 'post.sh --submit' <<<"$post" | head -1 | cut -d: -f1)"
+  [ "$dry" -lt "$stop" ]
+  [ "$stop" -lt "$submit" ]
+}
+
+@test "clean is reachable from the arguments" {
+  grep -q '^| `clean` or `clean --dry-run` |' "$skill"
+  grep -q '^## Clean$' "$skill"
+  grep -qF 'scripts/clean.sh' "$skill"
 }
 
 @test "every script the skill runs exists and is executable" {

@@ -17,6 +17,14 @@ teardown() {
 
 settings() { cat "$QUILL_HOME/.claude/settings.json"; }
 
+# The workspace with symlinks resolved. On macOS $TMPDIR is under /var, a
+# symlink to /private/var, so init lists both paths there.
+real_home() { (cd -P "$QUILL_HOME" && pwd -P); }
+
+# jq: the excludes init writes for <home> and its resolved path.
+EXCLUDES='def excludes($h; $r): (if $h == $r then [$h] else [$h, $r] end)
+  | map(. + "/repos/**", . + "/worktrees/**", . + "/reviews/**");'
+
 @test "init creates the workspace layout and prints its path" {
   run "$INIT"
   [ "$status" -eq 0 ]
@@ -33,9 +41,8 @@ settings() { cat "$QUILL_HOME/.claude/settings.json"; }
 @test "init writes claudeMdExcludes and the post ask rule" {
   run "$INIT"
   [ "$status" -eq 0 ]
-  run jq -e --arg h "$QUILL_HOME" \
-    '.claudeMdExcludes == [$h + "/repos/**", $h + "/worktrees/**", $h + "/reviews/**"]' \
-    "$QUILL_HOME/.claude/settings.json"
+  run jq -e --arg h "$QUILL_HOME" --arg r "$(real_home)" \
+    "$EXCLUDES"' .claudeMdExcludes == excludes($h; $r)' "$QUILL_HOME/.claude/settings.json"
   [ "$status" -eq 0 ]
   run jq -e '.permissions.ask == ["Bash(*post.sh*--submit*)"]' "$QUILL_HOME/.claude/settings.json"
   [ "$status" -eq 0 ]
@@ -67,12 +74,12 @@ settings() { cat "$QUILL_HOME/.claude/settings.json"; }
 JSON
   run "$INIT"
   [ "$status" -eq 0 ]
-  run jq -e --arg h "$QUILL_HOME" '
+  run jq -e --arg h "$QUILL_HOME" --arg r "$(real_home)" "$EXCLUDES"'
     .env.FOO == "1"
     and .permissions.allow == ["Read"]
     and .permissions.deny == ["WebFetch"]
     and .permissions.ask == ["Bash(git push *)", "Bash(*post.sh*--submit*)"]
-    and .claudeMdExcludes == ["/elsewhere/**", $h + "/repos/**", $h + "/worktrees/**", $h + "/reviews/**"]
+    and .claudeMdExcludes == ["/elsewhere/**"] + excludes($h; $r)
   ' "$QUILL_HOME/.claude/settings.json"
   [ "$status" -eq 0 ]
 }

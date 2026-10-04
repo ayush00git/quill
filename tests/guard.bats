@@ -294,6 +294,11 @@ assert_bash_denied() {
 }
 
 @test "reviewer: an unexpected exit in the guard becomes a deny" {
+  # A set -u abort exits 127 without running the ERR trap. Claude Code treats
+  # any exit but 2 as non-blocking and would run the tool, so the EXIT trap
+  # must turn it into a deny. Traps installed as in main().
+  run bash -c 'source "$1"; trap guard_exit EXIT; trap "deny internal" ERR; set -u; : "$NOT_SET"' _ "$GUARD"
+  [ "$status" -eq 2 ]
   run bash -c 'source "$1"; trap guard_exit EXIT; exit 1' _ "$GUARD"
   [ "$status" -eq 2 ]
   run bash -c 'source "$1"; trap guard_exit EXIT; exit 0' _ "$GUARD"

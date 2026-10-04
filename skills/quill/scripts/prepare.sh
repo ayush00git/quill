@@ -38,9 +38,11 @@ prepare_one() {
   number="$(jq -r .number "$item")" || return 1
   base="$(jq -r .base.ref "$item")" || return 1
   head="$(jq -r .head.sha "$item")" || return 1
-  last="$(jq -r '.quillState.reviewedHeadSha // empty' "$item")" || return 1
+  # The head reviewed last: quill's own draft, else my last review on GitHub
+  # (a PR I reviewed by hand before using quill still gets an incremental diff).
+  last="$(jq -r '.quillState.reviewedHeadSha // .lastMyReview.commit // empty' "$item")" || return 1
   if [ -n "$last" ] && ! _is_sha "$last"; then
-    warn "$repo#$number: ignoring a malformed reviewedHeadSha in state.json; doing a full review"
+    warn "$repo#$number: ignoring a malformed last reviewed SHA ($last); doing a full review"
     last=""
   fi
 

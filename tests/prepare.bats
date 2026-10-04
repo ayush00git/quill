@@ -98,7 +98,7 @@ queue_with() {
   queue_with '.quillState = {reviewedHeadSha: "not-a-sha"}'
   run "$SCRIPTS/prepare.sh" --run-dir "$RUN"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ignoring a malformed reviewedHeadSha"* ]] || false
+  [[ "$output" == *"ignoring a malformed last reviewed SHA"* ]] || false
   run jq -r '._note, .title, .body, has("quillState"), has("needsReview")' "$RUN/ctx/apache__foo__1/meta.json"
   [[ "${lines[0]}" == *"untrusted"* ]] || false
   [ "${lines[1]}" = "Add F" ]
@@ -169,6 +169,15 @@ queue_with() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"head moved since the queue was built"* ]] || false
   [ "$(jq -r .head_sha "$RUN/ctx/apache__foo__1/task.json")" = "$HEAD_SHA" ]
+}
+
+@test "a PR I reviewed on GitHub (no quill state) gets an incremental diff from that review" {
+  queue_with '.reReview = true | .lastMyReview = {state: "CHANGES_REQUESTED", commit: $base}'
+  run "$SCRIPTS/prepare.sh" --run-dir "$RUN"
+  [ "$status" -eq 0 ]
+  run jq -r '.mode, .last_reviewed' "$RUN/ctx/apache__foo__1/task.json"
+  [ "${lines[0]}" = "incremental" ]
+  [ "${lines[1]}" = "$BASE_SHA" ]
 }
 
 @test "items that don't need review are left alone" {

@@ -205,6 +205,13 @@ tests_json() { jq -r "$1" "$CTX/tests.json"; }
   [[ "$(tests_json .reason)" == *"couldn't tell how this repo runs its tests"* ]] || false
 }
 
+@test "--help prints the whole header" {
+  run "$SCRIPTS/run-tests.sh" --help
+  [ "$status" -eq 64 ]
+  [[ "$output" == "run-tests.sh: run the affected tests"* ]] || false
+  [[ "$output" == *"so a PR can't fill the disk." ]] || false
+}
+
 @test "run dirs and slugs are confined" {
   prepared_run
   run "$SCRIPTS/run-tests.sh" --run-dir "$TEST_TMP/elsewhere"

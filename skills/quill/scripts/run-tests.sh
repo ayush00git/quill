@@ -16,8 +16,8 @@
 # dependency-cache volume per repo, shared by that repo's PRs.
 #
 # Writes ctx/<slug>/tests.json for the reviewer:
-#   {status: passed|failed|timed out|not run, reason?, command?, exitCode?,
-#    durationSec?, logTail?}
+#   {status: passed|failed|timed out|output too large|not run, reason?,
+#    command?, exitCode?, durationSec?, logTail?}
 # and the full log to <run-dir>/tests/<slug>.log. No container runtime means
 # "not run" with the reason, never "passed". A run whose output passes
 # tests.maxLogBytes (default 50 MB) is stopped, so a PR can't fill the disk.
@@ -32,7 +32,8 @@ source "$SCRIPT_DIR/lib/repo.sh"
 source "$SCRIPT_DIR/lib/testplan.sh"
 
 usage() {
-  sed -n '4,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  # The header comment, however long it grows.
+  awk 'NR < 4 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}" >&2
   exit 64
 }
 

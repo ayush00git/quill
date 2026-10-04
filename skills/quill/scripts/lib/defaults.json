@@ -38,6 +38,7 @@
     "network": "bridge",
     "memory": "6g",
     "cpus": 4,
+    "maxLogBytes": 52428800,
     "cacheVolumes": false,
     "repos": {}
   }

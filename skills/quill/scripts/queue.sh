@@ -11,7 +11,8 @@
 # lib/normalize.jq (title, author, base/head, size, files, CI, reviews, ...)
 # the ball-in-court verdict from lib/classify.jq (court, needsReview, ...) and
 # the effective size from lib/size.jq (effectiveSize, sizeClass) and the
-# competing-PR groups from lib/group.jq (issueKeys, group, groupMembers).
+# competing-PR groups from lib/group.jq (issueKeys, group, groupMembers), and
+# the author's history in the repo from lib/history.sh (authorHistory).
 # --force marks every PR in my court for review even if quill already drafted
 # a review for its current head.
 # and prints a one-line summary. Repos come from --repo (repeatable) plus
@@ -25,6 +26,8 @@ source "$SCRIPT_DIR/lib/common.sh"
 source "$SCRIPT_DIR/lib/discover.sh"
 # shellcheck source=lib/enrich.sh
 source "$SCRIPT_DIR/lib/enrich.sh"
+# shellcheck source=lib/history.sh
+source "$SCRIPT_DIR/lib/history.sh"
 
 usage() {
   sed -n '4,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
@@ -92,6 +95,7 @@ main() {
     {version: 1, generatedAt: $at, viewer: $viewer,
      items: (map(classify($viewer; $cfg[0]; $state[0]; $force) | effective_size($cfg[0])) | group_items($cfg[0]))}' "$run_dir/enriched.json" |
     write_atomic "$run_dir/queue.json"
+  add_author_history "$run_dir/queue.json" || warn "couldn't add author history"
   rm -f "$run_dir/candidates.json" "$run_dir/enriched.json" "$run_dir/config.effective.json"
 
   jq -r '

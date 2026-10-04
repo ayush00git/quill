@@ -14,6 +14,13 @@
 #                       and no option that writes, runs or reads other files
 #   SubagentHandback    passes through (that's how it reports in auto mode)
 #   anything else       denied
+# Each reviewer is bound to one PR: its first read of a bundle's task.json
+# (reviews/<date>/.run/<run>/ctx/<slug>/task.json) records the binding in
+# $QUILL_HOME/.agents/<agent_id>. From then on it may read only that bundle,
+# that run's refs/, and the one worktree named in that task.json, and
+# `git -C` must be that worktree. So a reviewer steered by one PR can't read
+# another PR's bundle (its nonce) and forge that PR's review; capture.sh
+# rejects reports that don't match the binding.
 # Allowed calls get permissionDecision "allow" so parallel reviewers don't
 # stall on prompts. Denials exit 2, which blocks before permission rules run.
 #
@@ -74,7 +81,79 @@ check_read_path() {
     if path_within "$p" "$root"; then ok=0; fi
   done
   [ "$ok" -eq 0 ] || deny "$what: only paths under $HOME_DIR/worktrees or $HOME_DIR/reviews are readable: $1"
-  is_instruction_path "$(resolve_path "$p")" && deny "$what: instruction files are off limits: $1"
+  p="$(resolve_path "$p")" || deny "$what: can't resolve $1"
+  is_instruction_path "$p" && deny "$what: instruction files are off limits: $1"
+  check_binding "$p" "$what"
+  return 0
+}
+
+# --- one PR per reviewer --------------------------------------------------------
+
+# bound_ctx: the bundle this agent is bound to, or nothing.
+bound_ctx() {
+  [ -f "$AGENTS_DIR/$AGENT_ID" ] || return 0
+  head -1 "$AGENTS_DIR/$AGENT_ID"
+}
+
+bind_to() {
+  mkdir -p "$AGENTS_DIR"
+  printf '%s\n' "$1" >"$AGENTS_DIR/$AGENT_ID.tmp.$$"
+  mv -f "$AGENTS_DIR/$AGENT_ID.tmp.$$" "$AGENTS_DIR/$AGENT_ID"
+}
+
+# bound_worktree: the resolved worktree from the bound bundle's task.json.
+bound_worktree() {
+  local ctx wt
+  ctx="$(bound_ctx)"
+  [ -n "$ctx" ] || return 0
+  wt="$(jq -r '.worktree // ""' "$ctx/task.json")" || return 1
+  [ -n "$wt" ] || return 0
+  resolve_path "$wt"
+}
+
+# check_binding <resolved path> <what>: the one-PR rule for a path that is
+# already known to be under worktrees/ or reviews/.
+check_binding() {
+  local p="$1" what="$2" rel date dotrun run kind slug ctx bound wt
+  bound="$(bound_ctx)"
+  case "$p" in
+    "$R_REVIEWS") deny "$what: name your PR's context bundle, not the whole reviews directory" ;;
+    "$R_REVIEWS"/*)
+      rel="${p#"$R_REVIEWS"/}"
+      IFS=/ read -r date dotrun run kind slug _ <<<"$rel"
+      if [ "$dotrun" != ".run" ] || [ -z "$run" ] || [ -z "$kind" ]; then
+        deny "$what: only your PR's context bundle and the run's references are readable: $p"
+      fi
+      case "$kind" in
+        refs)
+          [ -n "$bound" ] || deny "$what: read your task.json first"
+          [ "$(dirname "$(dirname "$bound")")" = "$R_REVIEWS/$date/.run/$run" ] ||
+            deny "$what: only the references of your own run are readable"
+          ;;
+        ctx)
+          [ -n "$slug" ] || deny "$what: name your PR's bundle, not the ctx directory"
+          ctx="$R_REVIEWS/$date/.run/$run/ctx/$slug"
+          if [ -z "$bound" ]; then
+            [ "$p" = "$ctx/task.json" ] || deny "$what: read your task.json first ($ctx/task.json)"
+            [ -f "$p" ] || deny "$what: no task.json at $p"
+            bind_to "$ctx"
+            bound="$ctx"
+          fi
+          [ "$bound" = "$ctx" ] || deny "$what: you review $(basename "$bound") only; $slug belongs to another reviewer"
+          ;;
+        *) deny "$what: only your PR's context bundle and the run's references are readable: $p" ;;
+      esac
+      ;;
+    "$R_WORKTREES" | "$R_WORKTREES"/*)
+      [ -n "$bound" ] || deny "$what: read your task.json first"
+      wt="$(bound_worktree)" || deny "$what: can't read the worktree from your task.json"
+      [ -n "$wt" ] || deny "$what: your task.json names no worktree"
+      case "$p" in
+        "$wt" | "$wt"/*) ;;
+        *) deny "$what: only your PR's worktree ($wt) is readable" ;;
+      esac
+      ;;
+  esac
   return 0
 }
 
@@ -233,8 +312,12 @@ check_bash() {
   # Exactly a worktree root, never a directory inside one: git treats a PR
   # directory shaped like a bare repo (HEAD, objects/, refs/, config) as the
   # repository and obeys its config, e.g. a textconv command run by log -p.
-  [ "$(dirname "$(resolve_path "$dir")")" = "$(resolve_path "$HOME_DIR/worktrees")" ] ||
+  [ "$(dirname "$(resolve_path "$dir")")" = "$R_WORKTREES" ] ||
     deny "-C must name a worktree root, $HOME_DIR/worktrees/<name>, not a directory inside it"
+  local wt
+  wt="$(bound_worktree)" || deny "can't read the worktree from your task.json"
+  [ -n "$wt" ] || deny "read your task.json first"
+  [ "$(resolve_path "$dir")" = "$wt" ] || deny "-C must be your PR's worktree: $wt"
   i=$((i + 2))
   sub="${TOKENS[$i]:-}"
   case "$sub" in
@@ -300,6 +383,17 @@ main() {
   # shellcheck source=../skills/quill/scripts/lib/common.sh
   source "$GUARD_DIR/../skills/quill/scripts/lib/common.sh"
   HOME_DIR="$(quill_home)"
+  R_REVIEWS="$(resolve_path "$HOME_DIR/reviews")"
+  R_WORKTREES="$(resolve_path "$HOME_DIR/worktrees")"
+  AGENTS_DIR="$HOME_DIR/.agents"
+  AGENT_ID="$(jq -r '.agent_id // ""' <<<"$raw")"
+  # Explicit character list: bash 3.2 matches ranges like a-z by locale
+  # collation, so ranges in patterns aren't reliable.
+  case "$AGENT_ID" in
+    '' | .* | *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*)
+      deny "missing or malformed agent_id" ;;
+  esac
+  [ "${#AGENT_ID}" -le 128 ] || deny "malformed agent_id"
   CWD="$(jq -r '.cwd // ""' <<<"$raw")"
   [ -n "$CWD" ] || CWD="$PWD"
   tool="$(jq -r '.tool_name // ""' <<<"$raw")"

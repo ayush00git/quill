@@ -115,6 +115,24 @@ capture() { # capture <event json>: runs the hook; output must always be empty, 
   [ -f "$C2/output.raw" ]
 }
 
+@test "end to end: the guard's binding through a symlinked workspace lets the report in" {
+  # the guard records resolved paths; capture finds bundles via $QUILL_HOME
+  mkdir -p "$TEST_TMP/real"
+  mv "$QUILL_HOME"/* "$QUILL_HOME"/.[!.]* "$TEST_TMP/real/" 2>/dev/null || true
+  rmdir "$QUILL_HOME"
+  ln -s "$TEST_TMP/real" "$QUILL_HOME"
+  mkdir -p "$QUILL_HOME/worktrees/apache__foo__1"
+  jq -n --arg n "$N1" --arg wt "$QUILL_HOME/worktrees/apache__foo__1" \
+    '{pr: "apache/foo#1", nonce: $n, worktree: $wt}' >"$C1/task.json"
+  jq -cn --arg p "$C1/task.json" --arg cwd "$QUILL_HOME" '{hook_event_name: "PreToolUse", tool_name: "Read",
+    tool_input: {file_path: $p}, agent_type: "quill:pr-reviewer", agent_id: "ag1", cwd: $cwd}' >"$TEST_TMP/read.json"
+  run "$REPO_ROOT/hooks/guard.sh" <"$TEST_TMP/read.json"
+  [ "$status" -eq 0 ]
+  [ -f "$QUILL_HOME/.agents/ag1" ]
+  capture "$(substop quill:pr-reviewer "$(report "$N1")" ag1)"
+  [ "$(cat "$C1/output.raw")" = "$(report "$N1")" ]
+}
+
 @test "garbage input never fails or prints" {
   capture 'not json at all'
   capture '{}'

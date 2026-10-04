@@ -57,7 +57,7 @@ remove_worktree() {
 add_worktree() {
   local repo="$1" number="$2" sha="$3" gd wt unsafe
   case "$sha" in
-    *[!0-9a-f]* | '') die "not a full commit SHA: $sha" ;;
+    *[!0123456789abcdef]* | '') die "not a full commit SHA: $sha" ;;
   esac
   [ "${#sha}" -eq 40 ] || die "not a full commit SHA: $sha"
   gd="$(repo_git_dir "$repo")" || return 1

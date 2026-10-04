@@ -23,7 +23,7 @@ review_mode() {
   _is_sha "$head" || die "not a full commit SHA: $head"
   [ -z "$last" ] || _is_sha "$last" || die "not a full commit SHA: $last"
   git check-ref-format --branch "$base" >/dev/null 2>&1 || die "not a branch name: $base"
-  gd="$(repo_git_dir "$repo")"
+  gd="$(repo_git_dir "$repo")" || return 1
   mb="$(qgit --git-dir="$gd" merge-base "refs/quill/base/$base" "$head")" ||
     die "no merge base between $base and $repo#$number (fetch first)"
 
@@ -71,13 +71,14 @@ mark_reviewed() {
   local gd
   _is_sha "$3" || die "not a full commit SHA: $3"
   case "$2" in '' | 0* | *[!0-9]*) die "not a PR number: $2" ;; esac
-  gd="$(repo_git_dir "$1")"
+  gd="$(repo_git_dir "$1")" || return 1
   qgit --git-dir="$gd" update-ref "refs/quill/pr/$2/reviewed" "$3"
 }
 
 # last_reviewed <owner/name> <N>: the SHA from mark_reviewed, or nothing.
 last_reviewed() {
   local gd
-  gd="$(repo_git_dir "$1")"
+  case "$2" in '' | 0* | *[!0-9]*) die "not a PR number: $2" ;; esac
+  gd="$(repo_git_dir "$1")" || return 1
   qgit --git-dir="$gd" rev-parse --verify --quiet "refs/quill/pr/$2/reviewed^{commit}" || true
 }

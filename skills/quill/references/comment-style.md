@@ -46,7 +46,7 @@ Start every finding with a Conventional Comments label:
 
 - Critique the code, not the person. Terse is fine, rude isn't.
 - No em dashes. Plain sentences that read like a human wrote them.
-- Don't mention AI, tools or how the code was produced. Questions are about understanding the change, not its origin.
+- Don't speculate about AI, tools or how the code was produced. Questions are about understanding the change, not its origin. The one exception: when the PR says AI tools were used and no commit carries a `Generated-by:` token, a neutral `question:` asking for it is fine (ASF Generative Tooling Guidance, see `review-standard.md`).
 
 ## Banned phrases
 

@@ -91,6 +91,7 @@ By default quill never runs PR code: the review reports the PR's CI state, and "
 
 With `--run-tests`, each PR's affected tests run in a throwaway container:
 
+- Claude Code asks you first, once per run for all the PRs, because this runs the PRs' own code. If you decline, the PRs are reviewed without tests. A scheduled run can't ask, so it runs tests only if you set `tests.headless` to `true` (see [Scheduled runs](#scheduled-runs)).
 - The PR's files go in as a `git archive` stream on stdin. No host path is mounted, and the container sees no home directory, SSH keys, gh token, credentials or host environment.
 - All capabilities dropped, `no-new-privileges`, pid, memory and CPU limits, a timeout, and a cap on output size.
 - The network is on by default, because most builds download dependencies. That means a PR's tests can reach your local network and, on a cloud machine, its metadata service. Set `tests.network` to `"none"` to cut it, and do so on cloud hosts. Builds then need their dependencies in the image.
@@ -114,6 +115,7 @@ With `--run-tests`, each PR's affected tests run in a throwaway container:
 | `jiraProjects` | `{}` | JIRA keys per repo, for spotting competing PRs; by default the repo name in capitals |
 | `tests.runtime` | `"docker"` | `"docker"` or `"podman"` |
 | `tests.timeoutSec` | `900` | per PR |
+| `tests.headless` | `false` | `true` lets scheduled runs with `--run-tests` run PR tests without asking |
 | `tests.network` | `"bridge"` | `"none"` to cut it; recommended on cloud hosts |
 | `tests.memory`, `tests.cpus` | `"6g"`, `4` | container limits |
 | `tests.maxLogBytes` | `52428800` (50 MB) | a run whose output passes this is stopped, so a PR can't fill your disk |
@@ -140,7 +142,9 @@ cd ~/quill && env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACK
 
 Run it once by hand first. That confirms Claude Code and `gh` are logged in and usable from a non-interactive shell. A scheduler starts with a minimal environment, so the examples below go through a login shell (`bash -lc`) to get your usual `PATH`. On macOS, where the default shell is zsh, use `/bin/zsh -lc` if your `PATH` is set in `~/.zprofile`. If `claude`, `gh` or `jq` still isn't found, put their full paths in the command. If you moved the workspace, add `QUILL_HOME=<path>` next to `QUILL_HEADLESS=1` and `cd` there instead.
 
-Add `--run-tests` after `/quill:quill` (inside the quotes) to run tests too.
+To run tests too, add `--run-tests` after `/quill:quill` (inside the quotes) and set `"tests": {"headless": true}` in `config.json`. Without that setting, quill doesn't run them, and the PRs are reviewed without tests.
+
+Don't add `--allowedTools`, `--dangerously-skip-permissions` or a looser `--permission-mode` to this command. quill's scripts and the reviewer's read-only tools are already allowed, and a scheduled run must not be able to edit files or run anything else.
 
 ### cron (Linux, macOS)
 
@@ -228,7 +232,8 @@ A pull request is untrusted input, and quill hands it to an AI agent. The design
 - **PR code never runs on your machine.** Git hooks, filters, `export-subst` and symlinks are switched off in the clones. Checkouts leave out the PR's `CLAUDE.md`, `AGENTS.md` and `.claude/`. Tests run only with `--run-tests`, and only in a container.
 - **Reports are checked, not trusted.** A hook captures each reviewer's report, routed by a random nonce in its PR's bundle. quill validates it against the output contract before it becomes a review. Comments must sit on the diff; private text is dropped.
 - **PR text is escaped** wherever quill renders it: QUEUE.md cells carry no links, images or HTML that a preview would fetch.
-- **Posting needs you.** In the workspace, quill's own scripts and read-only commands run without prompts. Anything else asks, and printing the gh token or pushing is denied outright. The submit command always asks, even in auto mode and with permissions bypassed, and headless runs refuse to post.
+- **Posting and running tests need you.** In the workspace, quill's own scripts and read-only commands run without prompts. Anything else asks, and printing the gh token or pushing is denied outright. The submit command always asks, even in auto mode and with permissions bypassed, and headless runs refuse to post. Running PR tests asks once per run, unless a scheduled run opted in with `tests.headless`.
+- **Its settings stay yours.** Edits to the workspace's `config.json`, `.claude/`, `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` ask, from any session, even in auto or accept-edits mode. Text from a PR can't quietly opt scheduled runs into running tests or loosen these rules.
 
 Residual risks:
 

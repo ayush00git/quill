@@ -100,6 +100,24 @@ result() { # result <jq filter over this PR's result>
   [ "$(result .status)" = "saved" ]
 }
 
+@test "a closed or merged PR's review starts with a retrospective note; an open one's doesn't" {
+  local d="$QUILL_HOME/reviews/2026-10-04" s
+  for s in MERGED CLOSED OPEN; do
+    jq -n --arg s "$s" '{version: 1, items: [{repo: "apache/foo", number: 1, state: $s}]}' >"$RUN/queue.json"
+    write_report
+    save
+    [ "$status" -eq 0 ]
+    case "$s" in
+      MERGED) [ "$(head -2 "$d/apache__foo__1.md")" = "$(printf '> PR is merged; review is retrospective.\n')" ] ;;
+      CLOSED) [ "$(head -1 "$d/apache__foo__1.md")" = "> PR is closed; review is retrospective." ] ;;
+      OPEN) cmp -s "$d/apache__foo__1.md" "$TEST_TMP/review.md" ;;
+    esac
+  done
+  # the note is for the maintainer: nothing in the reviewer's bundle carries it
+  run grep -rl 'retrospective' "$CTX"
+  [ "$status" -ne 0 ]
+}
+
 @test "comments outside the diff are dropped with a warning; the review keeps the finding" {
   COMMENTS='[{"path": "src/a.go", "line": 3, "side": "RIGHT", "body": "ok"},
              {"path": "src/a.go", "line": 40, "side": "RIGHT", "body": "far away"},

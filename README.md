@@ -62,6 +62,8 @@ Run it from the workspace: posting refuses anywhere else, because the workspace 
 
 A PR is in your court when your review is requested or it's in a repo you watch, and you haven't reviewed it yet. It's also in your court when you have reviewed it and since then the author pushed, replied or re-requested your review. If not, it's waiting on the author and goes in a separate list. PRs you approved with nothing new since, PRs from bots and PRs from `skipAuthors` are skipped.
 
+A PR you name (`/quill:quill apache/foo#123`) is always reviewed, whatever those rules say: drafts, closed and merged PRs, your own, a bot's, or one you already approved. Only the full queue applies them. If quill already reviewed its current head, it says `already reviewed at <sha>; use --force to redo`. A closed or merged PR's review starts with a note that it's retrospective, and quill never posts to it.
+
 Each review runs in a `quill:pr-reviewer` subagent, up to `parallel` at a time, on your session's model unless you set `reviewerModel`.
 
 ## What you get

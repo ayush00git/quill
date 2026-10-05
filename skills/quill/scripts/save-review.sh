@@ -227,7 +227,19 @@ save_one() {
   home="$(resolve_path "$(quill_home)")"
   date_dir="$(resolve_path "$run_dir/../..")"
   path_within "$date_dir" "$home/reviews" || { reject "the run directory isn't inside $home/reviews"; return 0; }
-  write_atomic "$date_dir/$slug.md" <"$tmp/review.md"
+  # A closed or merged PR (asked for by name) gets a note on top, from the
+  # queue's PR state: queue.json is outside the bundle, so the reviewer
+  # never sees it.
+  local pr_state="" note=""
+  if [ -f "$run_dir/queue.json" ]; then
+    pr_state="$(jq -r --arg pr "$(jq -r .pr "$task")" \
+      'first(.items[] | select("\(.repo)#\(.number)" == $pr) | .state) // ""' "$run_dir/queue.json")" || pr_state=""
+  fi
+  case "$pr_state" in
+    MERGED) note="> PR is merged; review is retrospective." ;;
+    CLOSED) note="> PR is closed; review is retrospective." ;;
+  esac
+  { [ -z "$note" ] || printf '%s\n\n' "$note"; cat "$tmp/review.md"; } | write_atomic "$date_dir/$slug.md"
   write_atomic "$date_dir/$slug.comments.json" <"$tmp/comments.kept.json"
   rel_md="${date_dir#"$home"/}/$slug.md"
   rel_cm="${date_dir#"$home"/}/$slug.comments.json"

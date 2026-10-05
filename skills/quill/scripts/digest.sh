@@ -111,6 +111,9 @@ main() {
         | gsub("(?<f>[A-Za-z0-9_./-]+\\.[A-Za-z][A-Za-z0-9]*):[0-9]+(-[0-9]+)?"; "\(.f)")
         | gsub(" ?\\(L[0-9]+(-[0-9]+)?\\)"; "");
       def first_sentence: (capture("^(?<s>.*?[.?!])(\\s|$)") | .s) // .;
+      # no_refs backtracks quadratically on long dotted runs, and only the
+      # start of a finding or comment is shown, so it sees at most this much.
+      def head: .[0:1000];
       # Whole sentences, as many as fit in $n characters, in order.
       def fit($n): [scan("[^ ].*?[.?!](?=\\s|$)|[^ ].+$")]
         | reduce .[] as $x ({t: "", full: false};
@@ -118,10 +121,12 @@ main() {
             elif (.t + " " + $x | length) <= $n then .t += " " + $x else .full = true end)
         | .t | cap($n);
       def upcase_first: (.[0:1] | ascii_upcase) + .[1:];
+      # An expected answer on the same line as the question stays in the file.
       def item: capture("^(?<n>[0-9]+)\\. (?<t>.*)$") as $m
-        | "\($m.n). \($m.t | unlabel | no_refs | first_sentence | upcase_first | cap(220))";
+        | "\($m.n). \($m.t | head | sub("\\s*\\(?expected answer:.*"; ""; "i")
+            | unlabel | no_refs | first_sentence | upcase_first | cap(220))";
       def items($k): [.[] | select(.k == $k) | .v | item];
-      def leads($k): [.[] | select(.k == $k) | .v | no_refs | cap(220)];
+      def leads($k): [.[] | select(.k == $k) | .v | head | no_refs | cap(220)];
       # A comment body as one paragraph: no code blocks, list items as sentences.
       def flat: gsub("```[^`]*```"; "") | gsub("\n\\s*[-*] "; " ") | gsub("\\s+"; " ") | ltrimstr(" ") | rtrimstr(" ");
       [split("\n")[] | select(length > 0) | split("\t") | {k: .[0], v: (.[1:] | join("\t"))}]
@@ -136,7 +141,7 @@ main() {
           | (.body | capture("^(?<l>issue \\(blocking\\)|issue|suggestion|question|todo|nitpick)") | .l) as $l
           | {rank: ({"issue (blocking)": 0, issue: 1, suggestion: 2, question: 3, todo: 4, nitpick: 6}[$l // ""] // 5),
              text: (if (.summary | type) == "string" and (.summary | length) > 0 then .summary
-                    else (.body | unlabel | flat | no_refs | upcase_first) end
+                    else (.body | unlabel | flat | head | no_refs | upcase_first) end
                     | fit(300))}]
          | to_entries | sort_by(.value.rank, .key) | map(.value.text) | .[0:3]) as $suggested
       # Markdown blocks, one blank line apart (a list starting at 2 cannot

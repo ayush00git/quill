@@ -255,6 +255,28 @@ minimal_review() { # minimal_review <n> <verdict label>
   [ -z "$output" ]
 }
 
+@test "an expected answer on the question's own line stays in the review file" {
+  saved 6 comment 0 OPEN "Needs answers."
+  printf '# apache/foo#6: T\nfacts\n\n## Verdict: Comment (needs answers)\nx\n\n## Questions for the author\n1. question: why a global cache (Expected answer: to avoid recomputing per call)\n' >"$D/apache__foo__6.md"
+  digest
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'**Questions for the author**\n\n1. Why a global cache'* ]] || false
+  [[ "$output" != *"recomputing"* ]] || false
+}
+
+@test "long dotted text in findings and comment bodies doesn't stall the digest" {
+  saved 4 request_changes 1 OPEN "Slow regex."
+  local dotted
+  dotted="$(printf 'a.a%.0s' $(seq 1 20000))"
+  printf '# apache/foo#4: T\nfacts\n\n## Verdict: Request changes\nx\n\n## Blocking\n1. issue (blocking): %s\n' "$dotted" >"$D/apache__foo__4.md"
+  jq -n --arg b "issue: $dotted" '[{path: "a", line: 1, side: "RIGHT", body: $b}]' >"$D/apache__foo__4.comments.json"
+  local start=$SECONDS
+  digest
+  [ "$status" -eq 0 ]
+  # without the cap on what no_refs sees, this takes over 30 seconds
+  [ "$((SECONDS - start))" -lt 10 ]
+}
+
 @test "review text is cleaned: no control characters, findings capped at 220 characters" {
   saved 5 request_changes 0 OPEN "$(printf 'reason with \033[31mcolor\033[0m')"
   local long

@@ -3,7 +3,7 @@
 #
 # queue.sh: build the review queue for one run.
 #
-#   queue.sh --run-dir <dir> [--repo owner/name]... [--pr <owner/repo#N | PR URL>] [--force]
+#   queue.sh --run-dir <dir> [--repo owner/name]... [--pr <owner/repo#N | PR URL> [--at <sha>]] [--force]
 #
 # Writes <run-dir>/queue.json:
 #   {version: 1, generatedAt, viewer, items: [...]}
@@ -16,7 +16,9 @@
 # --force marks every PR in my court for review even if quill already drafted
 # a review for its current head.
 # and prints a one-line summary. Repos come from --repo (repeatable) plus
-# config.json "repos". With --pr, the queue is just that PR.
+# config.json "repos". With --pr, the queue is just that PR. --at pins its
+# review to one of its own commits, showing the PR as it was then
+# (lib/pin.sh), for example to compare with how it was reviewed.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,11 +30,13 @@ source "$SCRIPT_DIR/lib/discover.sh"
 source "$SCRIPT_DIR/lib/enrich.sh"
 # shellcheck source=lib/history.sh
 source "$SCRIPT_DIR/lib/history.sh"
+# shellcheck source=lib/pin.sh
+source "$SCRIPT_DIR/lib/pin.sh"
 
 usage() { usage_from_header "${BASH_SOURCE[0]}"; }
 
 main() {
-  local run_dir="" pr_ref="" repos="[]" force=false
+  local run_dir="" pr_ref="" at="" repos="[]" force=false
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --run-dir) run_dir="${2:-}"; shift 2 || usage ;;
@@ -43,12 +47,14 @@ main() {
         shift 2
         ;;
       --pr) pr_ref="${2:-}"; shift 2 || usage ;;
+      --at) at="${2:-}"; shift 2 || usage ;;
       --force) force=true; shift ;;
       -h | --help) usage ;;
       *) die "unknown argument: $1 (see --help)" 64 ;;
     esac
   done
   [ -n "$run_dir" ] || usage
+  [ -z "$at" ] || [ -n "$pr_ref" ] || die "--at works only with --pr (one PR)" 64
   require_cmd gh jq
   run_dir="$(require_run_dir "$run_dir")" || exit 1
 
@@ -79,6 +85,9 @@ main() {
 
   printf '%s\n' "$items" | write_atomic "$run_dir/candidates.json"
   enrich_items "$run_dir/candidates.json" "$viewer" "$run_dir/enriched.json"
+  if [ -n "$at" ]; then
+    pin_to_commit "$owner/$repo" "$number" "$at" "$run_dir/enriched.json"
+  fi
 
   local state_file
   state_file="$(quill_home)/state.json"

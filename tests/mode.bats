@@ -98,6 +98,29 @@ mode_of() { # mode_of <head> [last] -> "mode|diff|rangeDiff|lastReviewed"
   [ "$output" = "range-diff||$M1..$A $m2..$merged|$A" ]
 }
 
+@test "a PR merged with a merge commit is diffed from its own base commit, not to nothing" {
+  git -C "$SRC" checkout -q main
+  printf 'zero\n' >"$SRC/g.txt"
+  git -C "$SRC" add g.txt
+  git -C "$SRC" commit -q -m M2
+  local m2
+  m2="$(git -C "$SRC" rev-parse HEAD)"
+  git -C "$SRC" merge -q --no-ff --no-edit pr
+  refetch >/dev/null
+  # the head is in the base tip now, so the tip alone gives no diff
+  run review_mode apache/foo 1 main "$A"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"head is already in main"* ]] || false
+  # with the PR's own base sha (GraphQL baseRefOid) it's the real diff
+  run mode_of "$A" "" "$m2"
+  [ "$status" -eq 0 ]
+  [ "$output" = "full|$M1..$A||-" ]
+  # a base sha that's the head itself still leaves nothing to review
+  run review_mode apache/foo 1 main "$A" "" "$A"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"has no changes against main"* ]] || false
+}
+
 @test "a previously reviewed head that no longer exists falls back to a full review" {
   run mode_of "$A" "0123456789abcdef0123456789abcdef01234567"
   [ "$output" = "full|$M1..$A||-" ]

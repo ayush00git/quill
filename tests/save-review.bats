@@ -132,6 +132,21 @@ result() { # result <jq filter over this PR's result>
   grep -q 'src/a.go:3' "$QUILL_HOME/reviews/2026-10-04/apache__foo__1.md"
 }
 
+@test "a comment's summary is kept for the digest, normalized; a bad one is left out; a private one drops the comment" {
+  local long
+  long="$(printf 'x%.0s' $(seq 1 401))"
+  COMMENTS="$(jq -cn --arg long "$long" '[
+    {path: "src/a.go", line: 3, side: "RIGHT", body: "issue (blocking): F has no test.", summary: "  F has no test;\n add one for empty input.  "},
+    {path: "src/a.go", line: 2, side: "RIGHT", body: "suggestion: name it G.", summary: $long},
+    {path: "src/a.go", line: 1, side: "RIGHT", body: "question: why F?", summary: "Why F? Expected answer: speed"}]')"
+  write_report
+  save
+  [ "$status" -eq 0 ]
+  local c="$QUILL_HOME/reviews/2026-10-04/apache__foo__1.comments.json"
+  [ "$(jq -c '[.[] | {line, summary}]' "$c")" = '[{"line":3,"summary":"F has no test; add one for empty input."},{"line":2,"summary":null}]' ]
+  [[ "$output" == *"private text (expected answers or signals) in the body or summary"* ]] || false
+}
+
 @test "comments carrying private text or bad fields are dropped" {
   COMMENTS='[{"path": "src/a.go", "line": 3, "side": "RIGHT", "body": "question: why?\nExpected answer: because"},
              {"path": "src/a.go", "line": 2, "side": "RIGHT", "body": "Contributor signals: weak"},

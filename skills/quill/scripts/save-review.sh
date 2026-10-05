@@ -140,10 +140,16 @@ check_comments() {
         elif (.line | type) != "number" or .line < 1 or .line != (.line | floor) then {drop: "line must be a positive integer", c: .}
         elif (.body | length) > 65000 then {drop: "body over GitHub'"'"'s comment size limit", c: .}
         # case-insensitive, and Read: at the start of any line (jq'"'"'s ^ only anchors the whole string)
-        elif (.body | test("expected answer|contributor signals|(^|\n)\\s*read: *(likely understands|unclear|low effort)"; "i")) then {drop: "private text (expected answers or signals) in the body", c: .}
+        elif ((.body + "\n" + (if (.summary | type) == "string" then .summary else "" end))
+              | test("expected answer|contributor signals|(^|\n)\\s*read: *(likely understands|unclear|low effort)"; "i")) then {drop: "private text (expected answers or signals) in the body or summary", c: .}
         else
           ({path, line, side: (.side // "RIGHT"), body}
-            + (if .start_line == null then {} else {start_line, start_side: (.start_side // .side // "RIGHT")} end)) as $c
+            + (if .start_line == null then {} else {start_line, start_side: (.start_side // .side // "RIGHT")} end)
+            # The one-liner for the chat digest, never posted (post.sh sends only the
+            # fields above). A bad one is left out; the comment stays.
+            + (if (.summary | type) == "string" and (.summary | gsub("\\s+"; " ") | ltrimstr(" ") | length) > 0
+                  and (.summary | length) <= 400
+               then {summary: (.summary | gsub("\\s+"; " ") | ltrimstr(" ") | rtrimstr(" "))} else {} end)) as $c
           | if ($c | comment_in_diff($m)) then {keep: $c}
             else {drop: "line \(.line) (\($c.side)) of \(.path) is outside the diff", c: .}
             end

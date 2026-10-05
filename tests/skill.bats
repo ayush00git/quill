@@ -20,7 +20,7 @@ field() {
 @test "allowed-tools pre-approves quill's scripts and nothing that posts" {
   local tools
   tools="$(field allowed-tools)"
-  for s in init queue prepare save-review render-queue clean; do
+  for s in init queue prepare save-review render-queue digest clean; do
     [[ "$tools" == *"Bash(\${CLAUDE_SKILL_DIR}/scripts/$s.sh *)"* ]] || false
   done
   # running PR code (tests) always asks
@@ -33,7 +33,7 @@ field() {
   # every entry is one of quill's scripts
   local entries
   entries="$(grep -o 'Bash([^)]*)' <<<"$tools")"
-  [ "$(wc -l <<<"$entries" | tr -d ' ')" = "7" ]
+  [ "$(wc -l <<<"$entries" | tr -d ' ')" = "8" ]
   run grep -v '^Bash(${CLAUDE_SKILL_DIR}/scripts/[a-z-]*\.sh ' <<<"$entries"
   [ "$status" -eq 1 ]
 }

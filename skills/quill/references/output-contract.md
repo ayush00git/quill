@@ -60,10 +60,11 @@ A JSON array of the postable inline comments, possibly empty (`[]`). Each elemen
 | `body` | yes | the comment, following comment-style.md; may contain a `suggestion` block |
 | `start_line` | no | integer < `line`, for a multi-line comment |
 | `start_side` | no | `RIGHT` or `LEFT`, with `start_line` |
+| `summary` | no, but write one | the comment in one or two plain sentences, as you'd say it to the author: what to change and why. No label (`issue:`, `question:`, ...), no file or line references, no lists or code blocks, at most 300 characters. The maintainer sees it in the chat digest; it is never posted. |
 
 Rules:
 
 - `line` (and `start_line`) must fall inside a hunk of the PR's diff against the merge base, on the given side. A comment outside the diff doesn't reject the review: `save-review.sh` drops it from `comments.json` and reports a warning, and the finding stays in the review file. `post.sh` checks again at post time and moves any out-of-diff comment into the pending review body.
-- Bodies never contain expected answers, contributor signals or anything from the private sections.
+- Bodies and summaries never contain expected answers, contributor signals or anything from the private sections.
 - Put each issue in one comment. Don't repeat the same finding on several lines; list the other locations in the body.
 - A finding that has no line in the diff (for example a wrong issue reference) stays in the review file only.

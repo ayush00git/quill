@@ -20,9 +20,11 @@ field() {
 @test "allowed-tools pre-approves quill's scripts and nothing that posts" {
   local tools
   tools="$(field allowed-tools)"
-  for s in init queue prepare run-tests save-review render-queue clean; do
+  for s in init queue prepare save-review render-queue clean; do
     [[ "$tools" == *"Bash(\${CLAUDE_SKILL_DIR}/scripts/$s.sh *)"* ]] || false
   done
+  # running PR code (tests) always asks
+  [[ "$tools" != *"run-tests"* ]] || false
   # posting is only ever the dry run; --submit always asks
   [[ "$tools" == *"Bash(\${CLAUDE_SKILL_DIR}/scripts/post.sh --dry-run *)"* ]] || false
   [[ "$tools" != *"--submit"* ]] || false
@@ -31,7 +33,7 @@ field() {
   # every entry is one of quill's scripts
   local entries
   entries="$(grep -o 'Bash([^)]*)' <<<"$tools")"
-  [ "$(wc -l <<<"$entries" | tr -d ' ')" = "8" ]
+  [ "$(wc -l <<<"$entries" | tr -d ' ')" = "7" ]
   run grep -v '^Bash(${CLAUDE_SKILL_DIR}/scripts/[a-z-]*\.sh ' <<<"$entries"
   [ "$status" -eq 1 ]
 }

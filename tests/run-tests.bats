@@ -197,6 +197,24 @@ tests_json() { jq -r "$1" "$CTX/tests.json"; }
   [ "$(grep -c '^run ' "$DOCKER_STUB_DIR/calls")" = "0" ]
 }
 
+@test "scheduled runs: not run unless tests.headless is true" {
+  prepared_run
+  QUILL_HEADLESS=1 run "$SCRIPTS/run-tests.sh" --run-dir "$RUN"
+  [ "$status" -eq 0 ]
+  [ "$(tests_json .status)" = "not run" ]
+  [[ "$(tests_json .reason)" == "tests need confirmation: "*"tests.headless"* ]] || false
+  [ "$(grep -c '^run ' "$DOCKER_STUB_DIR/calls")" = "0" ]
+  # only the boolean counts
+  printf '%s\n' '{"tests": {"headless": "true", "repos": {"apache/foo": {"image": "busybox", "command": "true"}}}}' >"$QUILL_HOME/config.json"
+  QUILL_HEADLESS=1 run "$SCRIPTS/run-tests.sh" --run-dir "$RUN"
+  [ "$(tests_json .status)" = "not run" ]
+  [ "$(grep -c '^run ' "$DOCKER_STUB_DIR/calls")" = "0" ]
+  printf '%s\n' '{"tests": {"headless": true, "repos": {"apache/foo": {"image": "busybox", "command": "true"}}}}' >"$QUILL_HOME/config.json"
+  QUILL_HEADLESS=1 run "$SCRIPTS/run-tests.sh" --run-dir "$RUN"
+  [ "$(tests_json .status)" = "passed" ]
+  [ "$(grep -c '^run ' "$DOCKER_STUB_DIR/calls")" = "1" ]
+}
+
 @test "no test plan: not run, with the reason" {
   prepared_run
   printf '{}\n' >"$QUILL_HOME/config.json"

@@ -24,12 +24,16 @@
 # Allowed calls get permissionDecision "allow" so parallel reviewers don't
 # stall on prompts. Denials exit 2, which blocks before permission rules run.
 #
-# Every other session (Bash only):
+# Every other session, Bash:
 #   post.sh --submit    always "ask": creating the pending GitHub review needs
 #                       the user's explicit OK, in every session and directory.
 #                       Detected on the command with quotes and backslashes
 #                       stripped, and also when post.sh or --submit appears
 #                       next to $(...), ${...}, backticks or eval.
+#   run-tests.sh        "ask": it runs the PRs' own code (in a container), so
+#                       the user OKs it once per run. The one exception is a
+#                       scheduled run that opted in: QUILL_HEADLESS set and
+#                       config tests.headless true (run-tests.sh re-checks).
 #   inside $QUILL_HOME  allow-explicit. "allow" only for exactly one simple
 #                       command that is quill's own script (by real path) or a
 #                       read-only ls/cat/head/tail/wc/jq on workspace files
@@ -37,6 +41,12 @@
 #                       gh token (gh auth token, --show-token, auth status -t)
 #                       and git push/send-pack/http-push. Everything else asks,
 #                       so text from a PR can't run anything without a human.
+# Every other session, Write / Edit / MultiEdit / NotebookEdit:
+#   "ask" for the files that decide what quill and Claude Code may do in the
+#   workspace: config.json and .mcp.json, and CLAUDE.md, CLAUDE.local.md,
+#   AGENTS.md and .claude/ at any depth (they auto-load from subdirectories).
+#   Otherwise acceptEdits or auto mode could let text from a PR opt scheduled
+#   runs into running tests, or loosen the workspace's permissions.
 #
 # Input: the hook JSON on stdin. Output: nothing, an allow or ask decision,
 # or exit 2 (deny).
@@ -513,9 +523,11 @@ readonly_args() {
 }
 
 # allowed_command <command>: exactly one simple command that is one of quill's
-# own scripts (by real path) or a read-only look at workspace files.
+# own scripts (by real path) or a read-only look at workspace files. Sets
+# ALLOWED_SCRIPT to the script's name, or empty.
 allowed_command() {
   local cmd="$1" a0 r name
+  ALLOWED_SCRIPT=""
   [ "${#cmd}" -le "$MAX_COMMAND_LEN" ] || return 1
   case "$cmd" in *[[:cntrl:]]*) return 1 ;; esac
   TOK_SOFT=1
@@ -531,7 +543,10 @@ allowed_command() {
       case "$a0" in /*) r="$a0" ;; *) r="$CWD/$a0" ;; esac
       r="$(resolve_path "$r")" || return 1
       for name in $QUILL_SCRIPTS; do
-        [ "$r" != "$R_SCRIPTS/$name" ] || return 0
+        if [ "$r" = "$R_SCRIPTS/$name" ]; then
+          ALLOWED_SCRIPT="$name"
+          return 0
+        fi
       done
       return 1
       ;;
@@ -539,6 +554,22 @@ allowed_command() {
     jq) readonly_args 1 ${TOKENS[@]+"${TOKENS[@]:1}"} ;;
     *) return 1 ;;
   esac
+}
+
+TESTS_ASK="this runs the PRs' own code (their tests) in a container. Approve it only if you asked for --run-tests; one approval covers every PR in this run."
+
+# headless_tests_ok: a scheduled run whose maintainer opted in to tests.
+headless_tests_ok() {
+  [ -n "${QUILL_HEADLESS:-}" ] || return 1
+  [ "$(config_json 2>/dev/null | jq -r '.tests.headless == true' 2>/dev/null)" = true ]
+}
+
+# check_tests_gate <normalized command>: outside the workspace, ask before
+# anything that names quill's run-tests.sh. Inside it, allow-explicit finds
+# run-tests.sh by real path (session_branch).
+check_tests_gate() {
+  case "$1" in *skills/quill/scripts/run-tests.sh*) ask "$TESTS_ASK" ;; esac
+  return 0
 }
 
 session_branch() {
@@ -558,6 +589,7 @@ session_branch() {
   [ -n "$CWD" ] || CWD="$PWD"
   if [ -z "$home" ] || [ ! -d "$home" ] || ! path_within "$CWD" "$home"; then
     check_post_gate "$norm" 0
+    check_tests_gate "$norm"
     exit 0
   fi
 
@@ -575,9 +607,69 @@ session_branch() {
   hard_deny "$norm"
   check_post_gate "$norm" 1
   if allowed_command "$cmd"; then
+    # run-tests.sh runs the PRs' own code, so it asks, found by real path so
+    # a link under another name asks too. A scheduled run that opted in is
+    # the exception (run-tests.sh checks the same two things again).
+    if [ "$ALLOWED_SCRIPT" = run-tests.sh ]; then
+      if headless_tests_ok; then
+        allow "scheduled run with tests.headless: true"
+      fi
+      ask "$TESTS_ASK"
+    fi
     allow "one of quill's own commands"
   fi
   ask "this isn't one of quill's own commands. In the quill workspace every other command needs your OK, so text from a PR can't run anything on its own."
+}
+
+# Files that decide what quill and Claude Code may do in the workspace (lower
+# case: macOS file systems ignore case): config.json and .mcp.json at the top,
+# and instruction files at ANY depth, because Claude Code loads a nested
+# CLAUDE.md, CLAUDE.local.md, AGENTS.md or .claude/ when it reads files there.
+is_protected_rel() {
+  case "/$1/" in
+    /config.json/ | /.mcp.json/ | */.claude/* | */claude.md/ | */claude.local.md/ | */agents.md/) return 0 ;;
+  esac
+  return 1
+}
+
+# write_branch <hook json>: Write / Edit / MultiEdit / NotebookEdit in any
+# session. Ask before changing a protected workspace file; pass otherwise.
+write_branch() {
+  local raw="$1" path home cwd p rh lp lh rel f
+  path="$(jq -r '.tool_input.file_path // .tool_input.notebook_path // ""' <<<"$raw" 2>/dev/null)" || exit 0
+  [ -n "$path" ] || exit 0
+  # shellcheck source=../skills/quill/scripts/lib/common.sh
+  source "$GUARD_DIR/../skills/quill/scripts/lib/common.sh" || exit 0
+  home="$(quill_home 2>/dev/null)" || exit 0
+  [ -d "$home" ] || exit 0
+  # No ERR trap here: with errtrace it would fire inside $(...) and hand its
+  # output back as the path. Failures are checked explicitly and ask.
+  trap session_exit EXIT
+  cwd="$(jq -r '.cwd // ""' <<<"$raw")" || cwd=""
+  [ -n "$cwd" ] || cwd="$PWD"
+  case "$path" in /*) p="$path" ;; *) p="$cwd/$path" ;; esac
+  p="$(resolve_path "$p")" || p=""
+  rh="$(resolve_path "$home")" || rh=""
+  case "$p:$rh" in
+    /*:/*) ;;
+    *) ask "couldn't work out which file this edits; approve only if it isn't the quill workspace's settings." ;;
+  esac
+  lp="$(lower "$p")"
+  lh="$(lower "$rh")"
+  rel=""
+  case "$lp" in "$lh"/*) rel="${lp#"$lh"/}" ;; esac
+  if [ -n "$rel" ] && is_protected_rel "$rel"; then
+    ask "this edits $rel in the quill workspace, which decides what quill and Claude Code may do there. Approve only a change you asked for: text from a PR could try to turn off a check, plant instructions, or opt scheduled runs into running tests."
+  fi
+  # The same file under another name (a hard link, or a path through a link).
+  if [ -e "$p" ]; then
+    for f in config.json .claude/settings.json .claude/settings.local.json CLAUDE.md CLAUDE.local.md AGENTS.md .mcp.json; do
+      if [ -e "$rh/$f" ] && [ "$p" -ef "$rh/$f" ]; then
+        ask "this edits the quill workspace's $f (through another path). Approve only a change you asked for."
+      fi
+    done
+  fi
+  exit 0
 }
 
 # --- dispatch ----------------------------------------------------------------
@@ -627,8 +719,11 @@ main() {
   agent="${meta%%$'\t'*}"
   tool="${meta#*$'\t'}"
   if [ "$agent" != "$REVIEWER_AGENT" ]; then
-    [ "$tool" = Bash ] || exit 0
-    session_branch "$raw"
+    case "$tool" in
+      Bash) session_branch "$raw" ;;
+      Write | Edit | MultiEdit | NotebookEdit) write_branch "$raw" ;;
+      *) exit 0 ;;
+    esac
   fi
 
   # From here on every failure denies.

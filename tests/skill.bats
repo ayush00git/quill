@@ -64,6 +64,13 @@ field() {
   [ "$tests" -lt "$review" ]
 }
 
+@test "the report stays on this run" {
+  local report
+  report="$(sed -n '/^## Report$/,/^## /p' "$skill")"
+  [[ "$report" == *"at most seven short lines"* ]] || false
+  [[ "$report" == *"Leave out anything that isn't about this run"* ]] || false
+}
+
 @test "clean is reachable from the arguments" {
   grep -q '^| `clean` or `clean --dry-run` |' "$skill"
   grep -q '^## Clean$' "$skill"

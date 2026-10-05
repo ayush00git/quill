@@ -134,9 +134,9 @@ cd ~/quill && env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACK
 | Part | Why |
 |---|---|
 | `cd ~/quill` | the workspace settings only apply to sessions started there |
-| `env -u ANTHROPIC_API_KEY` | uses your Claude Code login, not an API key that happens to be in the environment |
+| `env -u ANTHROPIC_API_KEY` | makes the run use your Claude Code login. With an API key in the environment, `claude -p` doesn't fall back to the login; in a test, a stale key made the run hang |
 | `QUILL_HEADLESS=1` | makes posting refuse outright |
-| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | runs reviewers in the foreground, so the run waits for them before exiting |
+| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | turns off background tasks, so every reviewer runs in the foreground and finishes inside the run |
 | `--permission-mode dontAsk --permission-prompts none` | anything not already allowed is denied instead of waiting for an answer that never comes |
 | `--output-format json` | a machine-readable result for your logs |
 

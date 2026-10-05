@@ -14,10 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_DIR/lib/common.sh"
 
-usage() {
-  sed -n '4,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
-  exit 64
-}
+usage() { usage_from_header "${BASH_SOURCE[0]}"; }
 
 main() {
   local run_dir="" state results out

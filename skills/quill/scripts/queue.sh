@@ -29,10 +29,7 @@ source "$SCRIPT_DIR/lib/enrich.sh"
 # shellcheck source=lib/history.sh
 source "$SCRIPT_DIR/lib/history.sh"
 
-usage() {
-  sed -n '4,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
-  exit 64
-}
+usage() { usage_from_header "${BASH_SOURCE[0]}"; }
 
 main() {
   local run_dir="" pr_ref="" repos="[]" force=false

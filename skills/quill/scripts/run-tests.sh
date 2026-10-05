@@ -36,11 +36,7 @@ source "$SCRIPT_DIR/lib/repo.sh"
 # shellcheck source=lib/testplan.sh
 source "$SCRIPT_DIR/lib/testplan.sh"
 
-usage() {
-  # The header comment, however long it grows.
-  awk 'NR < 4 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}" >&2
-  exit 64
-}
+usage() { usage_from_header "${BASH_SOURCE[0]}"; }
 
 # not_run <ctx dir> <reason>
 not_run() {

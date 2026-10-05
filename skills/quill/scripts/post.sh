@@ -38,10 +38,7 @@ source "$SCRIPT_DIR/lib/repo.sh"
 # shellcheck source=lib/diffmap.sh
 source "$SCRIPT_DIR/lib/diffmap.sh"
 
-usage() {
-  sed -n '4,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
-  exit 64
-}
+usage() { usage_from_header "${BASH_SOURCE[0]}"; }
 
 # Text that must never reach GitHub: credentials (GitHub tokens including
 # refresh tokens, AWS, Slack, Anthropic API keys, private keys) and quill's

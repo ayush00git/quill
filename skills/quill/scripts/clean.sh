@@ -22,10 +22,7 @@ source "$SCRIPT_DIR/lib/repo.sh"
 # shellcheck source=lib/worktree.sh
 source "$SCRIPT_DIR/lib/worktree.sh"
 
-usage() {
-  sed -n '4,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
-  exit 64
-}
+usage() { usage_from_header "${BASH_SOURCE[0]}"; }
 
 # slug_to_key <owner__repo__N>: "owner/repo#N", or nothing if it isn't one.
 # Owners can't contain "_", so the first "__" ends the owner; the last one

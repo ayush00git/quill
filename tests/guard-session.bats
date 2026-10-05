@@ -97,6 +97,7 @@ each() { # each <pass|allow|ask|deny> <cwd> <command>...
   each allow "$CWD_IN" \
     "$SCR/init.sh" \
     "$SCR/queue.sh --run-dir reviews/2026-10-04/.run/r1 --repo apache/foo" \
+    "$SCR/digest.sh --run-dir reviews/2026-10-04/.run/r1" \
     "$SCR/prepare.sh --run-dir 'reviews/2026-10-04/.run/r1'" \
     "$SCR/save-review.sh --run-dir reviews/2026-10-04/.run/r1 --all" \
     "$SCR/render-queue.sh --run-dir reviews/2026-10-04/.run/r1" \

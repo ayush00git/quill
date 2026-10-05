@@ -401,7 +401,7 @@ check_bash() {
 # --- every session: the posting gate; in the workspace, allow-explicit -----------
 
 # Quill's own scripts: the only commands the workspace allows without asking.
-QUILL_SCRIPTS='init.sh queue.sh prepare.sh save-review.sh render-queue.sh run-tests.sh post.sh clean.sh'
+QUILL_SCRIPTS='init.sh queue.sh prepare.sh save-review.sh render-queue.sh digest.sh run-tests.sh post.sh clean.sh'
 
 # Options the read-only commands may use (anything else asks).
 JQ_SAFE_OPTIONS='-r -c -e -s -n -S -M -j -a --raw-output --compact-output --exit-status --slurp

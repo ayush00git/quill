@@ -206,3 +206,24 @@ teardown() {
   [ "$(resolve_path "$TEST_TMP/ws/missing/..")" = "$ws" ]
   path_within "$TEST_TMP/ws-link/new/dir/file" "$TEST_TMP/ws"
 }
+
+@test "resolve_path fallback follows a symlink reached after missing/.. (as realpath -m does)" {
+  mkdir -p "$TEST_TMP/bin" "$TEST_TMP/ws/worktrees/pr/d" "$TEST_TMP/out/sub"
+  printf '#!/bin/sh\nexit 1\n' >"$TEST_TMP/bin/realpath"
+  chmod +x "$TEST_TMP/bin/realpath"
+  PATH="$TEST_TMP/bin:$PATH"
+  local wt="$TEST_TMP/ws/worktrees/pr" out
+  ln -s "$TEST_TMP/out" "$wt/link"
+  ln -s ../../../out "$wt/rel"
+  ln -s "$wt/d" "$wt/dlink"
+  out="$(cd -P "$TEST_TMP/out" && pwd -P)"
+  # A text-only walk after the first missing directory would call these inside the
+  # worktree; the link they reach points outside it.
+  [ "$(resolve_path "$wt/missing/../link/x")" = "$out/x" ]
+  [ "$(resolve_path "$wt/missing/../rel/sub")" = "$out/sub" ]
+  [ "$(resolve_path "$wt/missing/m2/../../dlink/../link")" = "$out" ]
+  [ "$(resolve_path "$wt/missing/../../pr/link")" = "$out" ]
+  ! path_within "$wt/missing/../link/x" "$TEST_TMP/ws" || false
+  ! path_within "$wt/missing/../rel/sub" "$TEST_TMP/ws" || false
+  ! path_within "$wt/missing/m2/../../dlink/../link" "$TEST_TMP/ws" || false
+}

@@ -91,6 +91,7 @@ main() {
     md="$home/$(jq -r .reviewFile <<<"$item")"
     path_within "$md" "$home/reviews" || continue
     [ -f "$md" ] || continue
+    # shellcheck disable=SC2088 # a literal ~ for display
     case "$md" in "$HOME"/*) shown_md="~/${md#"$HOME"/}" ;; *) shown_md="$md" ;; esac
     task="$run_dir/ctx/$slug/task.json"
     [ -f "$task" ] || task="$QUILL_LIB_DIR/empty-results.json"

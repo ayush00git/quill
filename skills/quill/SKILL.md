@@ -3,7 +3,7 @@ name: quill
 description: Maintainer PR review queue. Finds the pull requests waiting on you, reviews each one in an isolated worktree with a read-only subagent, and writes a ranked QUEUE.md plus a private review per PR.
 argument-hint: "[owner/repo#N | PR URL | list | post <PR> | clean [--dry-run]] [--repo owner/name]... [--force] [--run-tests]"
 disable-model-invocation: true
-allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/init.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/queue.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/prepare.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/run-tests.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/save-review.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/render-queue.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/post.sh --dry-run *) Bash(${CLAUDE_SKILL_DIR}/scripts/clean.sh *)
+allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/init.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/queue.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/prepare.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/save-review.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/render-queue.sh *) Bash(${CLAUDE_SKILL_DIR}/scripts/post.sh --dry-run *) Bash(${CLAUDE_SKILL_DIR}/scripts/clean.sh *)
 ---
 
 # quill
@@ -50,6 +50,7 @@ For `post` and `clean`, follow only that section. Anything else: say what's supp
 
 4. **Tests (only with `--run-tests`).**
    `${CLAUDE_SKILL_DIR}/scripts/run-tests.sh --run-dir RUN`
+   Run it once for all PRs, never per PR. It runs the PRs' own code, so Claude Code asks the maintainer to allow it; that's intended. If they decline, review without tests and say so in the report.
    It prints one line per PR: `passed`, `failed`, `timed out`, `output too large`, or `not run` with the reason. Review every ready PR either way; the reviewer reads the result.
 
 5. **Review.** For each ready entry, launch the `quill:pr-reviewer` subagent with this prompt, substituting the entry's values:

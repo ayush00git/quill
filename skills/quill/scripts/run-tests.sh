@@ -15,6 +15,11 @@
 # "none" to cut it. tests.cacheVolumes (off by default) keeps a named
 # dependency-cache volume per repo, shared by that repo's PRs.
 #
+# Running PR code needs the maintainer's OK. In a session, the quill guard
+# asks before this script runs (one prompt per run, covering every PR). A
+# scheduled run (QUILL_HEADLESS set) has nobody to ask, so it runs tests only
+# when config tests.headless is true, and otherwise records "not run".
+#
 # Writes ctx/<slug>/tests.json for the reviewer:
 #   {status: passed|failed|timed out|output too large|not run, reason?,
 #    command?, exitCode?, durationSec?, logTail?}
@@ -177,7 +182,11 @@ main() {
   cfg="$(mktemp "${TMPDIR:-/tmp}/quill-cfg.XXXXXX")" || exit 1
   config_json >"$cfg"
   rt="$(jq -r '.tests.runtime // "docker"' "$cfg")"
-  why="$(runtime_ready "$rt")"
+  if [ -n "${QUILL_HEADLESS:-}" ] && [ "$(jq -r '.tests.headless == true' "$cfg")" != true ]; then
+    why="tests need confirmation: scheduled runs only run them when tests.headless is true in config.json"
+  else
+    why="$(runtime_ready "$rt")"
+  fi
 
   while IFS= read -r slug; do
     [ -n "$slug" ] || continue

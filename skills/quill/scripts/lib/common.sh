@@ -11,6 +11,14 @@ QUILL_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log() { printf 'quill: %s\n' "$*" >&2; }
 warn() { printf 'quill: warning: %s\n' "$*" >&2; }
 
+# usage_from_header <script>: print the script's header comment (from line 4
+# up to the first line that isn't a comment) to stderr, and exit 64. Unlike a
+# fixed line range, it can't fall behind when the header grows or shrinks.
+usage_from_header() {
+  awk 'NR < 4 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$1" >&2
+  exit 64
+}
+
 # die <message> [exit code]
 die() {
   printf 'quill: error: %s\n' "$1" >&2

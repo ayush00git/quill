@@ -26,10 +26,7 @@ source "$SCRIPT_DIR/lib/risk.sh"
 # shellcheck source=lib/bundle.sh
 source "$SCRIPT_DIR/lib/bundle.sh"
 
-usage() {
-  sed -n '4,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
-  exit 64
-}
+usage() { usage_from_header "${BASH_SOURCE[0]}"; }
 
 # prepare_one <run dir> <item file>: prints one dispatch entry (JSON).
 # Runs in a subshell so a die() inside only fails this PR. errexit doesn't

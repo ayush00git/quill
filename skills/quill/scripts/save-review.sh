@@ -25,10 +25,7 @@ source "$SCRIPT_DIR/lib/mode.sh"
 # shellcheck source=lib/diffmap.sh
 source "$SCRIPT_DIR/lib/diffmap.sh"
 
-usage() {
-  sed -n '4,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
-  exit 64
-}
+usage() { usage_from_header "${BASH_SOURCE[0]}"; }
 
 # Phrases comment-style.md bans unless tied to a line; reported as warnings.
 BANNED_PHRASES='consider adding tests

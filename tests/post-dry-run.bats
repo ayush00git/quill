@@ -79,6 +79,15 @@ payload() { cat "$QUILL_HOME/post/apache__foo__1.json"; }
   [[ "$output" == *"sha256: $sha"* ]] || false
 }
 
+@test "a comment's digest summary is never part of the payload" {
+  jq '.[0].summary = "Short version for the chat."' "$QUILL_HOME/reviews/2026-10-04/apache__foo__1.comments.json" >"$TEST_TMP/c.json"
+  mv "$TEST_TMP/c.json" "$QUILL_HOME/reviews/2026-10-04/apache__foo__1.comments.json"
+  run "$SCRIPTS/post.sh" --dry-run apache/foo#1
+  [ "$status" -eq 0 ]
+  [ "$(jq '[.comments[] | has("summary")] | any' "$QUILL_HOME/post/apache__foo__1.json")" = "false" ]
+  [[ "$output" != *"Short version for the chat."* ]] || false
+}
+
 @test "the head moved since the review: stop with exit 3" {
   : >"$GH_STUB_DIR/routes"
   pr_state open "1111111111111111111111111111111111111111"

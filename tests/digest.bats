@@ -8,36 +8,42 @@ load helpers/common
 setup() {
   setup_tmp
   export QUILL_HOME="$TEST_TMP/ws"
+  unset QUILL_HEADLESS
   D="$QUILL_HOME/reviews/2026-10-05"
   RUN="$D/.run/r1"
   mkdir -p "$RUN/ctx"
   printf '{"version": 1, "prs": {}}\n' >"$QUILL_HOME/state.json"
   printf '[]\n' >"$RUN/results.json"
+  printf '{"version": 1, "items": []}\n' >"$RUN/queue.json"
 }
 
 teardown() {
   teardown_tmp
 }
 
-# saved <n> <verdict> <comments> <mode> <reason>: a saved result for
-# apache/foo#<n>, with its state reason and task.json; the review file is
-# written by the caller to $D/apache__foo__<n>.md.
+# saved <n> <verdict> <comment count> <PR state> <reason>: a saved result for
+# apache/foo#<n>, with its state reason and queue state. The caller writes the
+# review to $D/apache__foo__<n>.md and the comments to .comments.json.
 saved() {
-  local slug="apache__foo__$1"
-  mkdir -p "$RUN/ctx/$slug"
   jq --arg n "$1" --arg v "$2" --argjson c "$3" '. + [{pr: "apache/foo#\($n)", slug: "apache__foo__\($n)",
-    status: "saved", verdict: $v, effort: "M", reviewFile: "reviews/2026-10-05/apache__foo__\($n).md", comments: $c}]' \
+    status: "saved", verdict: $v, effort: "M", comments: $c,
+    reviewFile: "reviews/2026-10-05/apache__foo__\($n).md",
+    commentsFile: "reviews/2026-10-05/apache__foo__\($n).comments.json"}]' \
     "$RUN/results.json" >"$TEST_TMP/r.json" && mv "$TEST_TMP/r.json" "$RUN/results.json"
   jq --arg k "apache/foo#$1" --arg r "$5" '.prs[$k] = {reason: $r}' "$QUILL_HOME/state.json" >"$TEST_TMP/s.json" &&
     mv "$TEST_TMP/s.json" "$QUILL_HOME/state.json"
-  jq -n --arg m "$4" '{mode: $m, last_reviewed: (if $m == "full" then null else "1bbcabb50588c22ddb19fa6ee4ce14b5e0506ca8" end)}' \
-    >"$RUN/ctx/$slug/task.json"
+  jq --argjson n "$1" --arg s "$4" '.items += [{repo: "apache/foo", number: $n, state: $s}]' "$RUN/queue.json" >"$TEST_TMP/q.json" &&
+    mv "$TEST_TMP/q.json" "$RUN/queue.json"
+  [ -f "$D/apache__foo__$1.comments.json" ] || printf '[]\n' >"$D/apache__foo__$1.comments.json"
 }
 
 digest() { run "$SCRIPTS/digest.sh" --run-dir "$RUN" "$@"; }
 
-@test "a full review: header, verdict line, reason, and every blocking, should-fix and question headline" {
-  saved 7 request_changes 3 full "F panics on empty input."
+shown() { # shown <path>: the review path as digest.sh prints it
+  case "$1" in "$HOME"/*) printf '~/%s' "${1#"$HOME"/}" ;; *) printf '%s' "$1" ;; esac
+}
+
+full_review() { # the review of apache/foo#7
   cat >"$D/apache__foo__7.md" <<'MD'
 # apache/foo#7: Add F
 https://github.com/apache/foo/pull/7 | @alice (CONTRIBUTOR, 2 merged here) | +40/-2 in 3 files | CI: failing | head abc1234
@@ -45,19 +51,16 @@ https://github.com/apache/foo/pull/7 | @alice (CONTRIBUTOR, 2 merged here) | +40
 ## Verdict: Request changes
 F panics on empty input, and nothing tests it.
 
-## Attention
-- `.github/workflows/ci.yml:12`: the PR changes a workflow.
-
 ## Blocking
-1. issue (blocking): `src/f.go:12`: F indexes `xs[0]` without a length check.
+1. issue (blocking): `src/f.go:12`: F indexes `xs[0]` without a length check. It panics on an empty slice.
    - Fix: return early when `len(xs) == 0`.
 
 ## Should fix
-2. suggestion: `src/f_test.go:1`: add a case for an empty slice.
+2. suggestion: `src/f_test.go:1`: add a case for an empty slice, as AGENTS.md:40 asks (L1-9).
 
 ## Questions for the author
 3. question: `src/f.go:30`: why a global cache here?
-   Expected answer: to avoid recomputing per call; it is safe because writes are locked.
+   Expected answer: to avoid recomputing per call.
 
 ## Nits (max 3)
 4. nitpick (non-blocking): `src/f.go:5`: unused import.
@@ -73,49 +76,123 @@ Read: unclear
 ## Suggested reply (low-effort or needs-answers PRs only)
 SUGGESTED REPLY
 MD
+  cat >"$D/apache__foo__7.comments.json" <<'JSON'
+[{"path": "src/f.go", "line": 5, "side": "RIGHT", "body": "nitpick (non-blocking): unused import."},
+ {"path": "src/f.go", "line": 30, "side": "RIGHT", "body": "question: why a global cache here?",
+  "summary": "Why keep a global cache here instead of one per call?"},
+ {"path": "src/f.go", "line": 12, "side": "RIGHT", "body": "issue (blocking): F indexes xs[0] without a length check.",
+  "summary": "F panics on an empty slice because it reads xs[0] first. Please return early when the slice is empty."},
+ {"path": "src/f_test.go", "line": 1, "side": "RIGHT", "body": "suggestion: add a test for an empty slice.",
+  "summary": "Please add a test for an empty slice."}]
+JSON
+}
+
+@test "a review: reason, findings without labels or file:line references, suggested comments, and the post offer" {
+  full_review
+  saved 7 request_changes 4 OPEN "F panics on empty input."
   digest
   [ "$status" -eq 0 ]
   local want
-  want="$(cat <<'OUT'
+  want="$(cat <<OUT
 ### apache/foo#7: Add F
-https://github.com/apache/foo/pull/7 | @alice (CONTRIBUTOR, 2 merged here) | +40/-2 in 3 files | CI: failing | head abc1234
-
-**Request changes** | effort M | 3 inline comment(s) | full review
 
 F panics on empty input.
 
-**Attention:** - `.github/workflows/ci.yml:12`: the PR changes a workflow.
-
 **Blocking**
 
-1. `src/f.go:12`: F indexes `xs[0]` without a length check.
+1. F indexes \`xs[0]\` without a length check.
 
 **Should fix**
 
-2. `src/f_test.go:1`: add a case for an empty slice.
+2. Add a case for an empty slice, as AGENTS.md asks.
 
-**Questions for the author**
+**Suggested comments**
 
-3. `src/f.go:30`: why a global cache here?
+- F panics on an empty slice because it reads xs[0] first. Please return early when the slice is empty.
+- Please add a test for an empty slice.
+- Why keep a global cache here instead of one per call?
 
-2 nit(s) | Review: ~/quill/reviews/2026-10-05/apache__foo__7.md
+2 nit(s) | Review: $(shown "$D/apache__foo__7.md")
+
+Want me to add these as a pending review on GitHub? It holds all the drafted comments, and only you will see it until you submit it there. Reply **post** to go ahead.
 OUT
 )"
-  # the review path is shown relative to the real home only when it's under it
-  want="${want//\~\/quill/$QUILL_HOME}"
   [ "$output" = "$want" ] || {
     diff <(printf '%s\n' "$want") <(printf '%s\n' "$output")
     false
   }
   # what stays in the file
-  [[ "$output" != *"Expected answer"* ]] || false
-  [[ "$output" != *"PRIVATE SIGNAL"* ]] || false
-  [[ "$output" != *"SUGGESTED REPLY"* ]] || false
-  [[ "$output" != *"Fix: return early"* ]] || false
+  local hidden
+  for hidden in "Expected answer" "PRIVATE SIGNAL" "SUGGESTED REPLY" "Fix: return early" "https://github.com" \
+    "CI: failing" "Request changes" "Questions for the author" "unused import" "f.go:12" "(L1-9)"; do
+    if [[ "$output" == *"$hidden"* ]]; then
+      echo "shown: $hidden"
+      false
+    fi
+  done
 }
 
-@test "a re-review after a retrospective note: scope since the last review, previous findings, no blocking" {
-  saved 4095 approve 0 incremental "The new commit only swaps test fixtures."
+@test "questions for the author appear only when the PR needs answers" {
+  full_review
+  sed -i.bak 's/^## Verdict: Request changes$/## Verdict: Comment (needs answers)/' "$D/apache__foo__7.md"
+  saved 7 comment 4 OPEN "Unclear why there is a cache."
+  digest
+  [[ "$output" == *$'**Questions for the author**\n\n3. Why a global cache here?'* ]] || false
+}
+
+@test "without summaries, suggested comments are the bodies as whole sentences, at most three, most severe first" {
+  printf '# apache/foo#8: T\nfacts\n\n## Verdict: Request changes\nx\n\n## Blocking\nNone.\n' >"$D/apache__foo__8.md"
+  jq -n '[
+    {path: "a", line: 1, body: "question: is this needed?"},
+    {path: "a", line: 2, body: "nitpick: rename it."},
+    {path: "a", line: 3, body: "issue: `a.go:3`: the loop never ends.\n\n- It reads `i` but never updates it.\n- See `b.go:9` (L9-12).\n\n```go\nfor i < n {}\n```\nPlease increment `i`."},
+    {path: "a", line: 4, body: "suggestion: extract a helper."}]' >"$D/apache__foo__8.comments.json"
+  saved 8 request_changes 4 OPEN "loop"
+  digest
+  [ "$status" -eq 0 ]
+  local s
+  s="$(sed -n '/^\*\*Suggested comments\*\*$/,/nit(s)\|^Review:/p' <<<"$output" | grep '^- ')"
+  [ "$s" = "$(printf '%s\n' \
+    '- The loop never ends. It reads `i` but never updates it. See `b.go`. Please increment `i`.' \
+    '- Extract a helper.' \
+    '- Is this needed?')" ]
+}
+
+@test "long suggested comments keep whole sentences within 300 characters" {
+  printf '# apache/foo#9: T\nfacts\n\n## Verdict: Request changes\nx\n\n## Blocking\nNone.\n' >"$D/apache__foo__9.md"
+  local s120
+  s120="$(printf 'w%.0s' $(seq 1 118))"
+  jq -n --arg s "$s120" '[{path: "a", line: 1, body: "issue: \($s). \($s). \($s)."}]' >"$D/apache__foo__9.comments.json"
+  saved 9 request_changes 1 OPEN "x"
+  digest
+  local line
+  line="$(grep '^- ' <<<"$output")"
+  [ "$line" = "- $(printf '%s. %s.' "$s120" "$s120" | sed 's/^w/W/')" ]
+}
+
+@test "the post offer: one PR, several PRs, never for merged PRs, PRs without comments, or headless runs" {
+  local n
+  for n in 1 2; do
+    printf '# apache/foo#%s: T\nfacts\n\n## Verdict: Request changes\nx\n\n## Blocking\nNone.\n' "$n" >"$D/apache__foo__$n.md"
+  done
+  saved 1 request_changes 2 OPEN "a"
+  digest
+  [ "${lines[${#lines[@]} - 1]}" = "Want me to add these as a pending review on GitHub? It holds all the drafted comments, and only you will see it until you submit it there. Reply **post** to go ahead." ]
+  saved 2 request_changes 1 OPEN "b"
+  digest
+  [ "${lines[${#lines[@]} - 1]}" = "Want me to add any of these as pending reviews on GitHub? Only you will see them until you submit them there. Reply **post** with the PR, for example **post apache/foo#1**." ]
+  QUILL_HEADLESS=1 digest
+  [[ "$output" != *"Want me to"* ]] || false
+  jq '.items |= map(.state = "MERGED")' "$RUN/queue.json" >"$TEST_TMP/q.json" && mv "$TEST_TMP/q.json" "$RUN/queue.json"
+  digest
+  [[ "$output" != *"Want me to"* ]] || false
+  jq '.items |= map(.state = "OPEN")' "$RUN/queue.json" >"$TEST_TMP/q.json" && mv "$TEST_TMP/q.json" "$RUN/queue.json"
+  jq 'map(.comments = 0)' "$RUN/results.json" >"$TEST_TMP/r.json" && mv "$TEST_TMP/r.json" "$RUN/results.json"
+  digest
+  [[ "$output" != *"Want me to"* ]] || false
+}
+
+@test "a re-review after a retrospective note: previous findings, no blocking" {
   cat >"$D/apache__foo__4095.md" <<'MD'
 > PR is merged; review is retrospective.
 
@@ -126,7 +203,7 @@ https://github.com/apache/foo/pull/4095 | @bob (MEMBER, 9 merged here) | +3/-1 i
 Only tests changed.
 
 ## Previous findings
-My earlier review had no findings, so nothing was left open.
+My earlier review at `src/a.go:3` had no findings, so nothing was left open.
 
 ## Blocking
 None.
@@ -140,15 +217,15 @@ None.
 ## Nits (max 3)
 None.
 MD
+  saved 4095 approve 0 MERGED "The new commit only swaps test fixtures."
   digest
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "### apache/foo#4095: feat(json): null handling" ]
-  [[ "$output" == *"**Approve** | effort M | 0 inline comment(s) | changes since 1bbcabb only"* ]] || false
-  [[ "$output" == *"**Previous findings:** My earlier review had no findings, so nothing was left open."* ]] || false
+  [[ "$output" == *"**Previous findings:** My earlier review at \`src/a.go\` had no findings, so nothing was left open."* ]] || false
   [[ "$output" == *"**Blocking:** none"* ]] || false
   [[ "$output" != *"Should fix"* ]] || false
-  [[ "$output" != *"Questions for the author"* ]] || false
-  [[ "$output" != *"nit(s)"* ]] || false
+  [[ "$output" != *"Suggested comments"* ]] || false
+  [[ "$output" != *"Want me to"* ]] || false
 }
 
 minimal_review() { # minimal_review <n> <verdict label>
@@ -156,11 +233,11 @@ minimal_review() { # minimal_review <n> <verdict label>
 }
 
 @test "most severe first, at most --max, the rest counted; unsaved results are skipped" {
-  saved 1 approve 0 full "fine"
+  saved 1 approve 0 OPEN "fine"
   minimal_review 1 Approve
-  saved 2 request_changes 1 full "broken"
+  saved 2 request_changes 0 OPEN "broken"
   minimal_review 2 "Request changes"
-  saved 3 comment 2 full "unclear"
+  saved 3 comment 0 OPEN "unclear"
   minimal_review 3 "Comment (needs answers)"
   jq '. + [{pr: "apache/foo#9", slug: "apache__foo__9", status: "rejected", reason: "bad"}]' "$RUN/results.json" >"$TEST_TMP/r.json"
   mv "$TEST_TMP/r.json" "$RUN/results.json"
@@ -178,8 +255,8 @@ minimal_review() { # minimal_review <n> <verdict label>
   [ -z "$output" ]
 }
 
-@test "review text is cleaned: no control characters, lines capped at 220 characters" {
-  saved 5 request_changes 1 full "$(printf 'reason with \033[31mcolor\033[0m')"
+@test "review text is cleaned: no control characters, findings capped at 220 characters" {
+  saved 5 request_changes 0 OPEN "$(printf 'reason with \033[31mcolor\033[0m')"
   local long
   long="$(printf 'x%.0s' $(seq 1 400))"
   printf '# apache/foo#5: T\nfacts\n\n## Verdict: Request changes\nx\n\n## Blocking\n1. issue (blocking): %s\n' "$long" >"$D/apache__foo__5.md"
@@ -189,20 +266,27 @@ minimal_review() { # minimal_review <n> <verdict label>
   [[ "$output" == *"reason with [31mcolor[0m"* ]] || false
   local item
   item="$(grep '^1\. ' <<<"$output")"
-  [ "${#item}" -eq 220 ]
+  [ "${#item}" -eq 223 ]
   [[ "$item" == *"..." ]] || false
 }
 
-@test "a review file outside reviews/ is not read" {
-  saved 6 request_changes 1 full "x"
+@test "review and comment files outside reviews/ are not read" {
+  saved 6 request_changes 1 OPEN "x"
   printf '# apache/foo#6: SECRET\n' >"$TEST_TMP/secret.md"
-  # relative to the workspace, ../secret.md is $TEST_TMP/secret.md: outside reviews/
-  [ -f "$QUILL_HOME/../secret.md" ]
+  printf '[{"path": "a", "line": 1, "body": "issue: LEAK"}]\n' >"$TEST_TMP/secret.json"
+  # relative to the workspace, ../secret.* is in $TEST_TMP: outside reviews/
   jq '.[0].reviewFile = "../secret.md"' "$RUN/results.json" >"$TEST_TMP/r.json"
   mv "$TEST_TMP/r.json" "$RUN/results.json"
   digest
   [ "$status" -eq 0 ]
   [[ "$output" != *"SECRET"* ]] || false
+  minimal_review 6 "Request changes"
+  jq '.[0].reviewFile = "reviews/2026-10-05/apache__foo__6.md" | .[0].commentsFile = "../secret.json"' "$RUN/results.json" >"$TEST_TMP/r.json"
+  mv "$TEST_TMP/r.json" "$RUN/results.json"
+  digest
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"### apache/foo#6"* ]] || false
+  [[ "$output" != *"LEAK"* ]] || false
 }
 
 @test "usage errors" {

@@ -75,7 +75,7 @@ Each review runs in a `quill:pr-reviewer` subagent, up to `parallel` at a time, 
 
 **`reviews/<date>/<owner>__<repo>__<N>.comments.json`** holds the inline comments that can be posted. Each one sits on a line of the PR's diff. Contributor signals and anything marked private never get in.
 
-At the end of a run, quill shows a digest in the chat for each PR it reviewed: verdict, effort, inline comment count and scope (the full PR, or only what changed since your last review); the reason; and the headline of every blocking finding, should-fix and question, numbered as in the review file. Expected answers, contributor signals and the suggested reply stay in the file.
+At the end of a run, quill shows a digest in the chat for each PR it reviewed: the reason for the verdict; each blocking and should-fix finding in a sentence; the questions for the author when the PR needs answers; and up to 3 suggested comments, in plain words. For an open PR it then offers to post the drafted comments as a pending review: reply **post** and quill shows the exact comments before anything is created. Expected answers, contributor signals and the suggested reply stay in the review file.
 
 Nothing is posted by a review.
 

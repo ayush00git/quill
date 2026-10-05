@@ -43,7 +43,8 @@
 #                       so text from a PR can't run anything without a human.
 # Every other session, Write / Edit / MultiEdit / NotebookEdit:
 #   "ask" for the files that decide what quill and Claude Code may do in the
-#   workspace: config.json, .claude/, CLAUDE.md, CLAUDE.local.md, .mcp.json.
+#   workspace: config.json and .mcp.json, and CLAUDE.md, CLAUDE.local.md,
+#   AGENTS.md and .claude/ at any depth (they auto-load from subdirectories).
 #   Otherwise acceptEdits or auto mode could let text from a PR opt scheduled
 #   runs into running tests, or loosen the workspace's permissions.
 #
@@ -620,9 +621,16 @@ session_branch() {
   ask "this isn't one of quill's own commands. In the quill workspace every other command needs your OK, so text from a PR can't run anything on its own."
 }
 
-# Files that decide what quill and Claude Code may do in the workspace,
-# relative to it, lower case (macOS file systems ignore case).
-PROTECTED_FILES='config.json .claude claude.md claude.local.md .mcp.json'
+# Files that decide what quill and Claude Code may do in the workspace (lower
+# case: macOS file systems ignore case): config.json and .mcp.json at the top,
+# and instruction files at ANY depth, because Claude Code loads a nested
+# CLAUDE.md, CLAUDE.local.md, AGENTS.md or .claude/ when it reads files there.
+is_protected_rel() {
+  case "/$1/" in
+    /config.json/ | /.mcp.json/ | */.claude/* | */claude.md/ | */claude.local.md/ | */agents.md/) return 0 ;;
+  esac
+  return 1
+}
 
 # write_branch <hook json>: Write / Edit / MultiEdit / NotebookEdit in any
 # session. Ask before changing a protected workspace file; pass otherwise.
@@ -650,12 +658,12 @@ write_branch() {
   lh="$(lower "$rh")"
   rel=""
   case "$lp" in "$lh"/*) rel="${lp#"$lh"/}" ;; esac
-  for f in $PROTECTED_FILES; do
-    case "$rel" in "$f" | "$f"/*) ask "this edits $rel in the quill workspace, which decides what quill and Claude Code may do there. Approve only a change you asked for: text from a PR could try to turn off a check or opt scheduled runs into running tests." ;; esac
-  done
+  if [ -n "$rel" ] && is_protected_rel "$rel"; then
+    ask "this edits $rel in the quill workspace, which decides what quill and Claude Code may do there. Approve only a change you asked for: text from a PR could try to turn off a check, plant instructions, or opt scheduled runs into running tests."
+  fi
   # The same file under another name (a hard link, or a path through a link).
   if [ -e "$p" ]; then
-    for f in config.json .claude/settings.json .claude/settings.local.json CLAUDE.md CLAUDE.local.md .mcp.json; do
+    for f in config.json .claude/settings.json .claude/settings.local.json CLAUDE.md CLAUDE.local.md AGENTS.md .mcp.json; do
       if [ -e "$rh/$f" ] && [ "$p" -ef "$rh/$f" ]; then
         ask "this edits the quill workspace's $f (through another path). Approve only a change you asked for."
       fi

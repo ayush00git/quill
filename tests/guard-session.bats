@@ -296,6 +296,17 @@ edits() { # edits <pass|ask> <cwd> <path>...: every write tool on each path
   done
 }
 
+@test "instruction files at any depth in the workspace ask, AGENTS.md included" {
+  local f
+  for f in AGENTS.md notes/CLAUDE.md notes/agents.md post/CLAUDE.local.md logs/.claude/skills/x/SKILL.md \
+    reviews/2026-10-04/.claude/rules/r.md worktrees/a__b__1/sub/CLAUDE.md; do
+    edits ask "$CWD_IN" "$QUILL_HOME/$f"
+    edits ask "$CWD_OUT" "$QUILL_HOME/$f"
+  done
+  # names that only contain those words stay editable
+  edits pass "$CWD_IN" "$QUILL_HOME/notes/CLAUDE.md.txt" "$QUILL_HOME/notes/my-agents.md" "$QUILL_HOME/notes/claude/x.md"
+}
+
 @test "other spellings of a protected file ask too" {
   printf '{}\n' >"$QUILL_HOME/config.json"
   mkdir -p "$QUILL_HOME/notes"

@@ -190,7 +190,8 @@ write_atomic() {
 }
 
 # resolve_path <path>: absolute path with every symlink resolved; missing
-# components are allowed (like realpath -m).
+# components are allowed (like realpath -m). The fallback fails below a
+# directory it can't search, since that could hide a link.
 resolve_path() {
   local p="$1" out="" rest c target n=0
   if command -v realpath >/dev/null 2>&1 && realpath -m / >/dev/null 2>&1; then
@@ -211,6 +212,8 @@ resolve_path() {
       '' | .) continue ;;
       ..) out="${out%/*}"; continue ;;
     esac
+    # A directory we can't search could hide a link: don't guess, fail.
+    if [ -d "${out:-/}" ] && [ ! -x "${out:-/}" ]; then return 1; fi
     if [ -L "$out/$c" ]; then
       n=$((n + 1))
       [ "$n" -le 40 ] || return 1

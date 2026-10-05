@@ -233,7 +233,7 @@ A pull request is untrusted input, and quill hands it to an AI agent. The design
 - **Reports are checked, not trusted.** A hook captures each reviewer's report, routed by a random nonce in its PR's bundle. quill validates it against the output contract before it becomes a review. Comments must sit on the diff; private text is dropped.
 - **PR text is escaped** wherever quill renders it: QUEUE.md cells carry no links, images or HTML that a preview would fetch.
 - **Posting and running tests need you.** In the workspace, quill's own scripts and read-only commands run without prompts. Anything else asks, and printing the gh token or pushing is denied outright. The submit command always asks, even in auto mode and with permissions bypassed, and headless runs refuse to post. Running PR tests asks once per run, unless a scheduled run opted in with `tests.headless`.
-- **Its settings stay yours.** Edits to the workspace's `config.json`, `.claude/`, `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` ask, from any session, even in auto or accept-edits mode. Text from a PR can't quietly opt scheduled runs into running tests or loosen these rules.
+- **Its settings stay yours.** Edits to the workspace's `config.json` and `.mcp.json`, and to any `.claude/`, `CLAUDE.md`, `CLAUDE.local.md` or `AGENTS.md` anywhere in it, ask from any session, even in auto or accept-edits mode. Text from a PR can't quietly opt scheduled runs into running tests or loosen these rules.
 
 Residual risks:
 

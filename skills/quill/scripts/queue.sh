@@ -97,11 +97,13 @@ main() {
 
   jq -r '
     def n(f): [.items[] | select(f)] | length;
-    "queue: \(.items | length) open PR(s): \(n(.needsReview)) to review"
+    "queue: \(.items | length) PR(s): \(n(.needsReview)) to review"
     + " (\(n(.needsReview and .reReview)) re-reviews),"
     + " \(n(.court == "mine" and (.needsReview | not))) unchanged since the last draft,"
     + " \(n(.court == "waiting_on_author")) waiting on author,"
-    + " \(n(.court == "skip")) skipped"' \
+    + " \(n(.court == "skip")) skipped",
+    (.items[] | select((.sources | index("explicit")) and .court == "mine" and (.needsReview | not))
+      | "\(.repo)#\(.number): already reviewed at \(.head.sha[0:7]); use --force to redo")' \
     "$run_dir/queue.json"
 }
 

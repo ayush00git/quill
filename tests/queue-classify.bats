@@ -170,14 +170,20 @@ reviewed() { # reviewed <state> <commit> <at>
   [ "$output" = "mine|not reviewed yet|false|2026-09-01T00:00:00Z|true" ]
 }
 
-@test "explicit --pr is always mine unless closed or my own, drafts included" {
+@test "explicit --pr is always mine: drafts, closed, merged, my own, bots and approved included" {
   run classify "$(item '.sources = ["explicit"] | .isDraft = true')"
   [ "$output" = "mine|requested on the command line|false|2026-09-01T00:00:00Z|true" ]
   upd='.sources = ["explicit"] | '
   run classify "$(item "$upd$(reviewed APPROVED "$HEAD" 2026-09-02T00:00:00Z)")"
   [ "$output" = "mine|requested on the command line|true|2026-09-01T00:00:00Z|true" ]
   run classify "$(item '.sources = ["explicit"] | .state = "CLOSED"')"
-  [ "$output" = "skip|closed or merged|false|null|false" ]
+  [ "$output" = "mine|requested on the command line (closed)|false|2026-09-01T00:00:00Z|true" ]
+  run classify "$(item '.sources = ["explicit"] | .state = "MERGED"')"
+  [ "$output" = "mine|requested on the command line (merged)|false|2026-09-01T00:00:00Z|true" ]
+  run classify "$(item '.sources = ["explicit"] | .state = "MERGED" | .author.login = "me"')"
+  [ "$output" = "mine|requested on the command line (merged)|false|2026-09-01T00:00:00Z|true" ]
+  run classify "$(item '.sources = ["explicit"] | .author.isBot = true | .author.login = "bot[bot]"')"
+  [ "$output" = "mine|requested on the command line|false|2026-09-01T00:00:00Z|true" ]
 }
 
 @test "unchanged head since quill's last draft: mine but not reviewed again, unless --force" {
@@ -203,8 +209,11 @@ JSON
   jq -n --arg h "$HEAD" '{version: 1, prs: {"apache/foo#1": {reviewedHeadSha: $h}}}' >"$QUILL_HOME/state.json"
   run "$SCRIPTS/queue.sh" --run-dir "$QUILL_HOME/reviews/2026-10-04/.run/t1" --pr apache/foo#1
   [ "$status" -eq 0 ]
-  [ "$output" = "queue: 1 open PR(s): 0 to review (0 re-reviews), 1 unchanged since the last draft, 0 waiting on author, 0 skipped" ]
+  [ "${lines[0]}" = "queue: 1 PR(s): 0 to review (0 re-reviews), 1 unchanged since the last draft, 0 waiting on author, 0 skipped" ]
+  # a PR named on the command line says why it isn't reviewed again
+  [ "${lines[1]}" = "apache/foo#1: already reviewed at ${HEAD:0:7}; use --force to redo" ]
+  [ "${#lines[@]}" -eq 2 ]
   run "$SCRIPTS/queue.sh" --run-dir "$QUILL_HOME/reviews/2026-10-04/.run/t1" --pr apache/foo#1 --force
-  [ "$output" = "queue: 1 open PR(s): 1 to review (0 re-reviews), 0 unchanged since the last draft, 0 waiting on author, 0 skipped" ]
+  [ "$output" = "queue: 1 PR(s): 1 to review (0 re-reviews), 0 unchanged since the last draft, 0 waiting on author, 0 skipped" ]
   teardown_tmp
 }

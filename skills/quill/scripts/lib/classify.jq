@@ -32,10 +32,16 @@ def classify($me; $cfg; $state; $force):
   | ((.sources | index("review-requested")) != null) as $requested_now
   | . + {lastMyReview: $last, quillState: $qs}
   | (
-      if .state != "OPEN" then _skip("closed or merged")
+      if (.sources | index("explicit")) then
+        # Asked for by name: reviewed whatever the queue's filters would say
+        # (closed, merged, draft, my own, a bot's, approved). post.sh still
+        # never posts to a PR that isn't open.
+        . + {court: "mine",
+             courtReason: ("requested on the command line"
+               + (if .state == "OPEN" then "" else " (\(.state | ascii_downcase))" end)),
+             reReview: ($last != null), waitingSince: .createdAt}
       elif .author.login == $me then _skip("my own PR")
-      elif (.sources | index("explicit")) then
-        . + {court: "mine", courtReason: "requested on the command line", reReview: ($last != null), waitingSince: .createdAt}
+      elif .state != "OPEN" then _skip("closed or merged")
       elif .isDraft then _skip("draft")
       elif (if ($cfg | has("skipBots")) then $cfg.skipBots else true end) and .author.isBot then _skip("bot author")
       elif (.author.login as $a | ($cfg.skipAuthors // []) | index($a)) then _skip("author in skipAuthors")

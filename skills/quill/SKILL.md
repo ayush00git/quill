@@ -42,7 +42,7 @@ For `post` and `clean`, follow only that section. Anything else: say what's supp
 
 2. **Queue.**
    `${CLAUDE_SKILL_DIR}/scripts/queue.sh --run-dir RUN` plus `--repo owner/name` for each `--repo`, `--pr <ref>` for a single PR, and `--force` if given.
-   It prints one summary line. If the argument was `list`, or it says `0 to review`, go to step 7.
+   It prints one summary line, plus `already reviewed at <sha>; use --force to redo` for a PR you named whose head quill already reviewed (say so in the report). If the argument was `list`, or it says `0 to review`, go to step 7.
 
 3. **Isolate.**
    `${CLAUDE_SKILL_DIR}/scripts/prepare.sh --run-dir RUN`

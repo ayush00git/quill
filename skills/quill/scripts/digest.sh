@@ -16,7 +16,8 @@
 #   - up to 3 suggested comments, most severe first: each drafted inline
 #     comment's summary (or the start of its body), without the label
 #   - how many nits there are, and the review file
-# Then, outside headless runs, it offers to post the drafts of open PRs as
+# Then, outside headless runs, it offers to post the drafts of open PRs
+# reviewed at their head (not pinned with --at) as
 # a pending review. Expected answers, contributor signals and the suggested
 # reply stay in the review file. Text comes from the reviews (which read
 # untrusted PR content): control characters are removed and lines capped.
@@ -158,10 +159,13 @@ main() {
         ((if $nits > 0 then "\($nits) nit(s) | " else "" end) + "Review: \($md)")
       ] | join("\n\n")' "$tmp/sections"
     shown=$((shown + 1))
-    # Postable: open on GitHub (as the queue saw it) with drafted comments.
+    # Postable: open on GitHub (as the queue saw it) with drafted comments,
+    # and reviewed at its head. A review pinned with --at is of an older
+    # commit, which post.sh refuses (head moved), so it isn't offered.
     pr_state=""
     if [ -f "$run_dir/queue.json" ]; then
-      pr_state="$(jq -r --arg pr "$pr" 'first(.items[] | select("\(.repo)#\(.number)" == $pr) | .state) // ""' \
+      pr_state="$(jq -r --arg pr "$pr" \
+        'first(.items[] | select("\(.repo)#\(.number)" == $pr) | if .reviewAt then "PINNED" else .state end) // ""' \
         "$run_dir/queue.json")" || pr_state=""
     fi
     if [ "$pr_state" = OPEN ] && [ "$(jq -r '.comments // 0' <<<"$item")" -gt 0 ]; then

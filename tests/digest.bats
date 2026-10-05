@@ -170,7 +170,7 @@ OUT
   [ "$line" = "- $(printf '%s. %s.' "$s120" "$s120" | sed 's/^w/W/')" ]
 }
 
-@test "the post offer: one PR, several PRs, never for merged PRs, PRs without comments, or headless runs" {
+@test "the post offer: one PR, several PRs, never for merged PRs, pinned reviews, PRs without comments, or headless runs" {
   local n
   for n in 1 2; do
     printf '# apache/foo#%s: T\nfacts\n\n## Verdict: Request changes\nx\n\n## Blocking\nNone.\n' "$n" >"$D/apache__foo__$n.md"
@@ -186,7 +186,12 @@ OUT
   jq '.items |= map(.state = "MERGED")' "$RUN/queue.json" >"$TEST_TMP/q.json" && mv "$TEST_TMP/q.json" "$RUN/queue.json"
   digest
   [[ "$output" != *"Want me to"* ]] || false
-  jq '.items |= map(.state = "OPEN")' "$RUN/queue.json" >"$TEST_TMP/q.json" && mv "$TEST_TMP/q.json" "$RUN/queue.json"
+  # a review pinned with --at to an older commit of an open PR can't be posted
+  jq '.items |= map(.state = "OPEN" | .reviewAt = "1bbcabb50588c22ddb19fa6ee4ce14b5e0506ca8")' "$RUN/queue.json" >"$TEST_TMP/q.json" &&
+    mv "$TEST_TMP/q.json" "$RUN/queue.json"
+  digest
+  [[ "$output" != *"Want me to"* ]] || false
+  jq '.items |= map(del(.reviewAt))' "$RUN/queue.json" >"$TEST_TMP/q.json" && mv "$TEST_TMP/q.json" "$RUN/queue.json"
   jq 'map(.comments = 0)' "$RUN/results.json" >"$TEST_TMP/r.json" && mv "$TEST_TMP/r.json" "$RUN/results.json"
   digest
   [[ "$output" != *"Want me to"* ]] || false

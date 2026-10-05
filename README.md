@@ -91,6 +91,7 @@ By default quill never runs PR code: the review reports the PR's CI state, and "
 
 With `--run-tests`, each PR's affected tests run in a throwaway container:
 
+- Claude Code asks you first, once per run for all the PRs, because this runs the PRs' own code. If you decline, the PRs are reviewed without tests. A scheduled run can't ask, so it runs tests only if you set `tests.headless` to `true` (see [Scheduled runs](#scheduled-runs)).
 - The PR's files go in as a `git archive` stream on stdin. No host path is mounted, and the container sees no home directory, SSH keys, gh token, credentials or host environment.
 - All capabilities dropped, `no-new-privileges`, pid, memory and CPU limits, a timeout, and a cap on output size.
 - The network is on by default, because most builds download dependencies. That means a PR's tests can reach your local network and, on a cloud machine, its metadata service. Set `tests.network` to `"none"` to cut it, and do so on cloud hosts. Builds then need their dependencies in the image.
@@ -114,11 +115,114 @@ With `--run-tests`, each PR's affected tests run in a throwaway container:
 | `jiraProjects` | `{}` | JIRA keys per repo, for spotting competing PRs; by default the repo name in capitals |
 | `tests.runtime` | `"docker"` | `"docker"` or `"podman"` |
 | `tests.timeoutSec` | `900` | per PR |
+| `tests.headless` | `false` | `true` lets scheduled runs with `--run-tests` run PR tests without asking |
 | `tests.network` | `"bridge"` | `"none"` to cut it; recommended on cloud hosts |
 | `tests.memory`, `tests.cpus` | `"6g"`, `4` | container limits |
 | `tests.maxLogBytes` | `52428800` (50 MB) | a run whose output passes this is stopped, so a PR can't fill your disk |
 | `tests.cacheVolumes` | `false` | keep a dependency-cache volume per repo; a repo's PRs share it, so one PR's build can poison the next one's cache |
 | `tests.repos` | `{}` | `{"owner/repo": {"image": "...", "command": "..."}}`; `{modules}` in the command becomes the affected modules |
+
+## Scheduled runs
+
+quill can build the queue unattended, so the reviews are waiting when you sit down. A headless run reviews and writes QUEUE.md like an interactive one, but **never posts**: `post.sh` refuses when `QUILL_HEADLESS` is set, and the posting rule can't be answered without a person.
+
+```bash
+cd ~/quill && env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
+  claude -p "/quill:quill" --permission-mode dontAsk --permission-prompts none --output-format json
+```
+
+| Part | Why |
+|---|---|
+| `cd ~/quill` | the workspace settings only apply to sessions started there |
+| `env -u ANTHROPIC_API_KEY` | makes the run use your Claude Code login. With an API key in the environment, `claude -p` doesn't fall back to the login; in a test, a stale key made the run hang |
+| `QUILL_HEADLESS=1` | makes posting refuse outright |
+| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` | turns off background tasks, so every reviewer runs in the foreground and finishes inside the run |
+| `--permission-mode dontAsk --permission-prompts none` | anything not already allowed is denied instead of waiting for an answer that never comes |
+| `--output-format json` | a machine-readable result for your logs |
+
+Run it once by hand first. That confirms Claude Code and `gh` are logged in and usable from a non-interactive shell. A scheduler starts with a minimal environment, so the examples below go through a login shell (`bash -lc`) to get your usual `PATH`. On macOS, where the default shell is zsh, use `/bin/zsh -lc` if your `PATH` is set in `~/.zprofile`. If `claude`, `gh` or `jq` still isn't found, put their full paths in the command. If you moved the workspace, add `QUILL_HOME=<path>` next to `QUILL_HEADLESS=1` and `cd` there instead.
+
+To run tests too, add `--run-tests` after `/quill:quill` (inside the quotes) and set `"tests": {"headless": true}` in `config.json`. Without that setting, quill doesn't run them, and the PRs are reviewed without tests.
+
+Don't add `--allowedTools`, `--dangerously-skip-permissions` or a looser `--permission-mode` to this command. quill's scripts and the reviewer's read-only tools are already allowed, and a scheduled run must not be able to edit files or run anything else.
+
+### cron (Linux, macOS)
+
+`crontab -e`, then for 07:00 on weekdays:
+
+```cron
+0 7 * * 1-5 /bin/bash -lc 'cd ~/quill && env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/quill:quill" --permission-mode dontAsk --permission-prompts none --output-format json >>~/quill/logs/headless.log 2>&1'
+```
+
+### launchd (macOS)
+
+`~/Library/LaunchAgents/dev.quill.review.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.quill.review</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd ~/quill &amp;&amp; env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/quill:quill" --permission-mode dontAsk --permission-prompts none --output-format json &gt;&gt;~/quill/logs/headless.log 2&gt;&amp;1</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+</dict>
+</plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.quill.review.plist
+```
+
+If the Mac is asleep at 07:00, launchd runs the job when it wakes. If it's off, the run is skipped.
+
+### systemd (Linux)
+
+`~/.config/systemd/user/quill.service`:
+
+```ini
+[Unit]
+Description=quill review queue
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -lc 'cd ~/quill && env -u ANTHROPIC_API_KEY QUILL_HEADLESS=1 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/quill:quill" --permission-mode dontAsk --permission-prompts none --output-format json >>~/quill/logs/headless.log 2>&1'
+```
+
+`~/.config/systemd/user/quill.timer`:
+
+```ini
+[Unit]
+Description=quill review queue, weekday mornings
+
+[Timer]
+OnCalendar=Mon..Fri 07:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now quill.timer
+loginctl enable-linger "$USER"   # only if it should run while you're logged out
+```
+
+With `Persistent=true`, a run missed while the timer was inactive happens as soon as it starts again: at login, or at boot with lingering.
 
 ## Security model
 
@@ -128,7 +232,8 @@ A pull request is untrusted input, and quill hands it to an AI agent. The design
 - **PR code never runs on your machine.** Git hooks, filters, `export-subst` and symlinks are switched off in the clones. Checkouts leave out the PR's `CLAUDE.md`, `AGENTS.md` and `.claude/`. Tests run only with `--run-tests`, and only in a container.
 - **Reports are checked, not trusted.** A hook captures each reviewer's report, routed by a random nonce in its PR's bundle. quill validates it against the output contract before it becomes a review. Comments must sit on the diff; private text is dropped.
 - **PR text is escaped** wherever quill renders it: QUEUE.md cells carry no links, images or HTML that a preview would fetch.
-- **Posting needs you.** In the workspace, quill's own scripts and read-only commands run without prompts. Anything else asks, and printing the gh token or pushing is denied outright. The submit command always asks, even in auto mode and with permissions bypassed, and headless runs refuse to post.
+- **Posting and running tests need you.** In the workspace, quill's own scripts and read-only commands run without prompts. Anything else asks, and printing the gh token or pushing is denied outright. The submit command always asks, even in auto mode and with permissions bypassed, and headless runs refuse to post. Running PR tests asks once per run, unless a scheduled run opted in with `tests.headless`.
+- **Its settings stay yours.** File edits (Write, Edit) to the workspace's `config.json` and `.mcp.json`, and to any `.claude/`, `CLAUDE.md`, `CLAUDE.local.md` or `AGENTS.md` anywhere in it, ask from any session, even in auto or accept-edits mode. Shell commands that would write them ask when the session runs in the workspace; from a session elsewhere they get Claude Code's usual permission checks, which is one more reason to run quill only from its workspace. Text from a PR can't quietly opt scheduled runs into running tests or loosen these rules.
 
 Residual risks:
 

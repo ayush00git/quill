@@ -9,7 +9,12 @@
 #                       commits (prepare.sh also checks it's in the PR's
 #                       history)
 #   ci                  that commit's checks, as GitHub reports them now
-#   files, size         base...commit, from GitHub's compare API
+#   files, size         base...commit, from GitHub's compare API (against
+#                       the PR's own base sha when the commit is already in
+#                       the base branch, as review_mode does)
+#   pinnedCommits       the PR's commits up to the pinned one, oldest first:
+#                       classify.jq keeps quill's own draft only if it's of
+#                       one of them
 #   myReviews           only my reviews of commits before it, by the PR's
 #                       commit order (not by timestamps), so my review of the
 #                       pinned commit itself, or anything later, isn't shown
@@ -21,7 +26,7 @@
 # pin_to_commit <owner/repo> <N> <sha, 7 to 40 hex digits> <enriched.json>:
 # rewrites the PR's item in enriched.json in place.
 pin_to_commit() {
-  local repo="$1" number="$2" want file="$4" tmp sha n base
+  local repo="$1" number="$2" want file="$4" tmp sha n base base_sha cmp_jq
   want="$(printf '%s' "$3" | tr 'ABCDEF' 'abcdef')"
   case "$want" in '' | *[!0123456789abcdef]*) die "--at wants a commit SHA (hex digits), not: $3" 64 ;; esac
   if [ "${#want}" -lt 7 ] || [ "${#want}" -gt 40 ]; then
@@ -32,8 +37,7 @@ pin_to_commit() {
   # The PR's own commits, oldest first (GitHub lists up to 250).
   if ! gh api --method GET "repos/$repo/pulls/$number/commits?per_page=100" --paginate --jq '.[].sha' \
     >"$tmp/commits" 2>"$tmp/err"; then
-    rm -rf "$tmp"
-    die "listing $repo#$number's commits failed: $(head -1 "$tmp/err" 2>/dev/null)"
+    _pin_fail "$tmp" "listing $repo#$number's commits failed"
   fi
   n="$(grep -c "^$want" "$tmp/commits" || true)"
   case "$n" in
@@ -51,25 +55,37 @@ pin_to_commit() {
         oid statusCheckRollup { state contexts { totalCount } }
         checkSuites(first: 30) { nodes { status conclusion app { slug } } } } } } }' \
     -f owner="${repo%%/*}" -f name="${repo#*/}" -f oid="$sha" >"$tmp/commit.json" 2>"$tmp/err"; then
-    rm -rf "$tmp"
-    die "reading $sha's checks failed: $(head -1 "$tmp/err" 2>/dev/null)"
+    _pin_fail "$tmp" "reading $sha's checks failed"
   fi
 
-  # The PR's files and size as of that commit.
+  # The PR's files and size as of that commit: base...commit, like the
+  # review's diff. A commit already in the base branch (a PR merged with a
+  # merge commit) compares as empty there, so then it's against the PR's own
+  # base sha, as review_mode does.
   base="$(jq -r --arg r "$repo" --argjson n "$number" \
     'first(.[] | select(.repo == $r and .number == $n) | .base.ref) // ""' "$file")"
   [ -n "$base" ] || { rm -rf "$tmp"; die "$repo#$number isn't in the queue"; }
-  if ! gh api --method GET "repos/$repo/compare/$base...$sha" \
-    --jq '{files: [.files[]? | {filename, additions, deletions, status}]}' >"$tmp/compare.json" 2>"$tmp/err"; then
-    rm -rf "$tmp"
-    die "comparing $base...$sha failed: $(head -1 "$tmp/err" 2>/dev/null)"
+  cmp_jq='{status, files: [.files[]? | {filename, additions, deletions, status}]}'
+  if ! gh api --method GET "repos/$repo/compare/$base...$sha" --jq "$cmp_jq" >"$tmp/compare.json" 2>"$tmp/err"; then
+    _pin_fail "$tmp" "comparing $base...$sha failed"
   fi
+  case "$(jq -r .status "$tmp/compare.json")" in
+    behind | identical)
+      base_sha="$(jq -r --arg r "$repo" --argjson n "$number" \
+        'first(.[] | select(.repo == $r and .number == $n) | .base.sha) // ""' "$file")"
+      _pin_is_sha "$base_sha" || { rm -rf "$tmp"; die "$sha is already in $base, and $repo#$number's own base commit isn't known"; }
+      if ! gh api --method GET "repos/$repo/compare/$base_sha...$sha" --jq "$cmp_jq" >"$tmp/compare.json" 2>"$tmp/err"; then
+        _pin_fail "$tmp" "comparing ${base_sha:0:7}...$sha failed"
+      fi
+      ;;
+  esac
 
   jq -L "$QUILL_LIB_DIR" --arg r "$repo" --argjson n "$number" --arg sha "$sha" \
     --rawfile commits "$tmp/commits" --slurpfile c "$tmp/commit.json" --slurpfile cmp "$tmp/compare.json" '
     include "normalize";
     ($commits | split("\n") | map(select(length > 0))) as $all
-    | ($all[:($all | index($sha))]) as $before
+    | ($all | index($sha)) as $i
+    | ($all[:$i]) as $before
     | ($c[0].data.repository.object // null) as $o
     | if ($o.oid // "") != $sha then error("GitHub has no commit \($sha)") else . end
     | ($cmp[0].files) as $f
@@ -80,11 +96,21 @@ pin_to_commit() {
                changeType: ({added: "ADDED", removed: "DELETED", renamed: "RENAMED", copied: "COPIED"}[.status] // "MODIFIED")}],
              filesTruncated: (($f | length) >= 300),
              size: {additions: ([$f[].additions] | add // 0), deletions: ([$f[].deletions] | add // 0), files: ($f | length)},
-             myReviews: [.myReviews[] | select(.commit as $rc | $before | index($rc))],
+             pinnedCommits: $all[:$i + 1],
+             myReviews: [.myReviews[]? | select(.commit as $rc | $before | index($rc))],
              reviewDecision: null, mergeable: null, mergeStateStatus: null, updatedAt: null}
       else . end)' "$file" >"$tmp/pinned.json" || { rm -rf "$tmp"; die "pinning $repo#$number to $sha failed"; }
   write_atomic "$file" <"$tmp/pinned.json"
   rm -rf "$tmp"
+}
+
+# _pin_fail <tmp dir> <message>: dies with the message and the first line of
+# the failed call's stderr, after removing the tmp dir.
+_pin_fail() {
+  local err
+  err="$(head -1 "$1/err" 2>/dev/null)"
+  rm -rf "$1"
+  die "$2: $err"
 }
 
 _pin_is_sha() {

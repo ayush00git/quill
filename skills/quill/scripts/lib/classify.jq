@@ -27,7 +27,13 @@ def _skip($why): . + {court: "skip", courtReason: $why, reReview: false, waiting
 
 def classify($me; $cfg; $state; $force):
   (.repo + "#" + (.number | tostring)) as $key
-  | ($state.prs[$key] // null) as $qs
+  # A review pinned with --at (lib/pin.sh) keeps quill's draft only if it's
+  # of the pinned commit or an earlier one: a draft of a later head would run
+  # the diff backwards and show the reviewer the later review.
+  | (.pinnedCommits // null) as $pinned
+  | ($state.prs[$key] // null
+     | (.reviewedHeadSha // "") as $h
+     | if $pinned != null and ($pinned | index($h)) == null then null else . end) as $qs
   | ([.myReviews[]? | select(.state != "DISMISSED")] | last) as $last
   | ((.sources | index("review-requested")) != null) as $requested_now
   | . + {lastMyReview: $last, quillState: $qs}

@@ -55,6 +55,35 @@ field() { jq -c ".[0] | $1" "$TEST_TMP/enriched.json"; }
   [ "$(field '[.reviewDecision, .mergeable, .mergeStateStatus, .updatedAt]')" = '[null,null,null,null]' ]
   # the real state stays on the item (bundle.sh shows the reviewer OPEN)
   [ "$(field '.state')" = '"MERGED"' ]
+  # the commits up to the pinned one, for classify.jq's check of quill's own draft
+  [ "$(field '.pinnedCommits')" = "[\"$C0\",\"$C1\"]" ]
+}
+
+@test "a commit already in the base branch is compared against the PR's own base sha" {
+  B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  jq --arg b "$B" '.[0].base.sha = $b' "$TEST_TMP/enriched.json" >"$TEST_TMP/e" && mv "$TEST_TMP/e" "$TEST_TMP/enriched.json"
+  # the first matching route wins, so drop setup's compare route
+  grep -v 'compare/main' "$GH_STUB_DIR/routes" >"$TEST_TMP/routes" && mv "$TEST_TMP/routes" "$GH_STUB_DIR/routes"
+  echo '{"status": "behind", "files": []}' | gh_respond "api --method GET repos/apache/foo/compare/main...$C1 --jq *"
+  gh_respond "api --method GET repos/apache/foo/compare/$B...$C1 --jq *" <<'JSON'
+{"status": "ahead", "files": [{"filename": "src/c.go", "additions": 3, "deletions": 1, "status": "modified"}]}
+JSON
+  pin "$C1"
+  [ "$status" -eq 0 ]
+  [ "$(field '.size')" = '{"additions":3,"deletions":1,"files":1}' ]
+  # without a base sha it refuses rather than pin an empty PR
+  jq '.[0].base.sha = null' "$TEST_TMP/enriched.json" >"$TEST_TMP/e" && mv "$TEST_TMP/e" "$TEST_TMP/enriched.json"
+  pin "$C1"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"is already in main, and apache/foo#1's own base commit isn't known"* ]] || false
+}
+
+@test "a failed GitHub call is reported with its reason" {
+  # no routes: the stub fails with "gh stub: no route for: ..." on stderr
+  : >"$GH_STUB_DIR/routes"
+  run pin_to_commit apache/foo 1 "$C1" "$TEST_TMP/enriched.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"listing apache/foo#1's commits failed: gh stub: no route for: "* ]] || false
 }
 
 @test "my reviews of the pinned commit or later are hidden, by commit order; earlier ones stay" {

@@ -32,10 +32,15 @@ def classify($me; $cfg; $state; $force):
   | ((.sources | index("review-requested")) != null) as $requested_now
   | . + {lastMyReview: $last, quillState: $qs}
   | (
-      if .state != "OPEN" then _skip("closed or merged")
-      elif .author.login == $me then _skip("my own PR")
+      if .author.login == $me then _skip("my own PR")
       elif (.sources | index("explicit")) then
-        . + {court: "mine", courtReason: "requested on the command line", reReview: ($last != null), waitingSince: .createdAt}
+        # Asked for by name, so reviewed even once closed or merged (for a
+        # retrospective or an eval); post.sh still never posts to it.
+        . + {court: "mine",
+             courtReason: ("requested on the command line"
+               + (if .state == "OPEN" then "" else " (\(.state | ascii_downcase))" end)),
+             reReview: ($last != null), waitingSince: .createdAt}
+      elif .state != "OPEN" then _skip("closed or merged")
       elif .isDraft then _skip("draft")
       elif (if ($cfg | has("skipBots")) then $cfg.skipBots else true end) and .author.isBot then _skip("bot author")
       elif (.author.login as $a | ($cfg.skipAuthors // []) | index($a)) then _skip("author in skipAuthors")

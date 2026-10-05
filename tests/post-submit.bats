@@ -79,6 +79,18 @@ sha256_of() { (sha256sum "$1" 2>/dev/null || shasum -a 256 "$1") | cut -d' ' -f1
   [ "$(posts)" = "1" ]
 }
 
+@test "a PR that closed or merged after the dry run is never posted to" {
+  # GitHub now says merged: swap the PR fixture (the first matching route wins)
+  local fx
+  fx="$(awk -F'\t' '$1 == "api --method GET repos/apache/foo/pulls/1" { print $2; exit }' "$GH_STUB_DIR/routes")"
+  [ -n "$fx" ]
+  jq -n --arg h "$HEAD_SHA" '{state: "closed", merged: true, head: {sha: $h}, base: {ref: "main"}}' >"$GH_STUB_DIR/$fx"
+  submit
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"apache/foo#1 isn't open any more; nothing posted"* ]] || false
+  [ "$(posts)" = "0" ]
+}
+
 @test "headless runs never post" {
   QUILL_HEADLESS=1 submit
   [ "$status" -eq 5 ]

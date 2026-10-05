@@ -57,6 +57,13 @@ field() { jq -c ".[0] | $1" "$TEST_TMP/enriched.json"; }
   [ "$(field '.state')" = '"MERGED"' ]
 }
 
+@test "my reviews of the pinned commit or later are hidden, by commit order; earlier ones stay" {
+  pin "$C1"
+  [ "$status" -eq 0 ]
+  # the approval of C1 (submitted after it was pushed) and the review of C2 go
+  [ "$(field '[.myReviews[].commit]')" = "[\"$C0\"]" ]
+}
+
 @test "the SHA must be hex, 7 to 40 digits, and one of the PR's commits" {
   local bad
   for bad in "" "HEAD" "1bbcab" "1bbcabb-" "g000000" "$C1"0; do

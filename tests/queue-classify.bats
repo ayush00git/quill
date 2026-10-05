@@ -197,6 +197,28 @@ reviewed() { # reviewed <state> <commit> <at>
   [ "$output" = "mine|not reviewed yet|false|2026-09-01T00:00:00Z|true" ]
 }
 
+@test "a review pinned with --at keeps quill's draft only if it's of the pinned commit or an earlier one" {
+  # pinnedCommits as lib/pin.sh leaves it: the PR's commits up to the pinned HEAD
+  upd="$(printf '.sources = ["explicit"] | .pinnedCommits = ["%s", "%s"]' "$OLD" "$HEAD")"
+  qs() {
+    jq -L "$LIB" -c --argjson cfg "$CFG" --argjson state "$STATE" \
+      'include "classify"; classify("me"; $cfg; $state; false) | [.quillState.reviewedHeadSha, .needsReview]' <<<"$1"
+  }
+  LATER="2222222222222222222222222222222222222222"
+  # a draft of a later head is dropped: a full review, no prev/ from the future
+  STATE="$(jq -cn --arg h "$LATER" '{version: 1, prs: {"apache/foo#7": {reviewedHeadSha: $h}}}')"
+  run qs "$(item "$upd")"
+  [ "$output" = '[null,true]' ]
+  # a draft of an earlier commit stays, for an incremental review
+  STATE="$(jq -cn --arg h "$OLD" '{version: 1, prs: {"apache/foo#7": {reviewedHeadSha: $h}}}')"
+  run qs "$(item "$upd")"
+  [ "$output" = "[\"$OLD\",true]" ]
+  # a draft of the pinned commit itself: already reviewed
+  STATE="$(jq -cn --arg h "$HEAD" '{version: 1, prs: {"apache/foo#7": {reviewedHeadSha: $h}}}')"
+  run qs "$(item "$upd")"
+  [ "$output" = "[\"$HEAD\",false]" ]
+}
+
 @test "queue.sh applies classification and state, and --force" {
   setup_tmp
   use_gh_stub

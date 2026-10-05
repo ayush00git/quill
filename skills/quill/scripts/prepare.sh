@@ -6,7 +6,8 @@
 #   prepare.sh --run-dir <dir>
 #
 # For each queue.json item with needsReview: cached clone, fetch, sparse
-# worktree at the PR head, review mode, and a context bundle in
+# worktree at the PR head (or the commit queue.sh --at pinned, which must be
+# in the PR's history), review mode, and a context bundle in
 # <run-dir>/ctx/<slug>/. Writes <run-dir>/dispatch.json:
 #   {version: 1, refsDir, prs: [{pr, slug, ctxDir, worktree, mode} | {pr, error}]}
 # One PR failing doesn't stop the others; it's listed with its error.
@@ -32,11 +33,13 @@ usage() { usage_from_header "${BASH_SOURCE[0]}"; }
 # Runs in a subshell so a die() inside only fails this PR. errexit doesn't
 # reach into command substitutions on older bash, so every step checks.
 prepare_one() {
-  local run_dir="$1" item="$2" repo number base head last gd wt mode_file ctx fetched
+  local run_dir="$1" item="$2" repo number base base_sha head at last gd wt mode_file ctx fetched
   repo="$(jq -r .repo "$item")" || return 1
   number="$(jq -r .number "$item")" || return 1
   base="$(jq -r .base.ref "$item")" || return 1
   head="$(jq -r .head.sha "$item")" || return 1
+  base_sha="$(jq -r '.base.sha // empty' "$item")" || return 1
+  at="$(jq -r '.reviewAt // empty' "$item")" || return 1
   # The head reviewed last: quill's own draft, else my last review on GitHub
   # (a PR I reviewed by hand before using quill still gets an incremental diff).
   last="$(jq -r '.quillState.reviewedHeadSha // .lastMyReview.commit // empty' "$item")" || return 1
@@ -47,14 +50,20 @@ prepare_one() {
 
   gd="$(ensure_clone "$repo")" || return 1
   fetched="$(fetch_pr "$repo" "$number" "$base")" || return 1
-  if [ "$fetched" != "$head" ]; then
+  if [ -n "$at" ]; then
+    # queue.sh --at: review that commit, which must be in the PR's history.
+    if ! _is_sha "$at" || ! qgit --git-dir="$gd" merge-base --is-ancestor "$at" "$fetched" 2>/dev/null; then
+      die "$repo#$number: $at isn't in the PR's history (refs/pull/$number/head)"
+    fi
+    head="$at"
+  elif [ "$fetched" != "$head" ]; then
     warn "$repo#$number: head moved since the queue was built ($head -> $fetched); reviewing $fetched"
     head="$fetched"
   fi
   wt="$(add_worktree "$repo" "$number" "$head")" || return 1
   mkdir -p "$run_dir/ctx"
   mode_file="$run_dir/ctx/.mode-$number-$$.json"
-  review_mode "$repo" "$number" "$base" "$head" "$last" >"$mode_file" || return 1
+  review_mode "$repo" "$number" "$base" "$head" "$last" "$base_sha" >"$mode_file" || return 1
   ctx="$(write_bundle "$run_dir" "$item" "$gd" "$wt" "$mode_file")" || return 1
   jq -c --arg pr "$repo#$number" --arg ctx "$ctx" --arg wt "$wt" \
     '{pr: $pr, slug: ($ctx | split("/") | last), ctxDir: $ctx, worktree: $wt, mode: .mode}' "$mode_file" || return 1
@@ -85,7 +94,8 @@ main() {
     if entry="$( (prepare_one "$run_dir" "$item") 2>"$run_dir/.prepare-err")"; then
       printf '%s\n' "$entry" >>"$entries"
     else
-      err="$(grep 'quill: error:' "$run_dir/.prepare-err" | tail -1 | sed 's/^quill: error: //')"
+      # No error line (a step failed without die) must not end the whole run.
+      err="$({ grep 'quill: error:' "$run_dir/.prepare-err" || true; } | tail -1 | sed 's/^quill: error: //')"
       [ -n "$err" ] || err="$(tail -1 "$run_dir/.prepare-err")"
       warn "$key: not prepared: $err"
       jq -cn --arg pr "$key" --arg e "$err" '{pr: $pr, error: $e}' >>"$entries"

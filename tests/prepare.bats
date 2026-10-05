@@ -190,6 +190,54 @@ queue_with() {
   [ ! -e "$QUILL_HOME/worktrees/apache__foo__1" ]
 }
 
+@test "--at: a pinned commit is reviewed as the PR was then, even after a merge commit landed it" {
+  local src="$TEST_TMP/src"
+  # a second commit after the pinned one, then the PR merged into main with a
+  # merge commit, so main's CONTRIBUTING.md is now the PR's
+  git -C "$src" checkout -q pr
+  printf 'package a\n\nfunc F() {}\nfunc G() {}\n' >"$src/src/a.go"
+  git -C "$src" commit -q -am second
+  git -C "$src" checkout -q main
+  git -C "$src" merge -q --no-ff --no-edit pr
+  git -C "$src" push -q -f "$TEST_TMP/remotes/apache/foo.git" main "pr:refs/pull/1/head"
+  # the item as queue.sh --at leaves it, pinned to the first commit
+  queue_with '.state = "MERGED" | .sources = ["explicit"] | .reviewAt = $head
+    | .courtReason = "requested on the command line (merged)"
+    | .authorHistory = {merged: 3, closedUnmerged: 0, open: 0, recent: [{number: 1, merged: true}, {number: 9, merged: true}]}'
+  run "$SCRIPTS/prepare.sh" --run-dir "$RUN"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | tail -1)" = "prepare: 1 PR(s) ready for review" ]
+  # the pinned commit, not the PR's head, diffed from the PR's own base
+  [ "$(git -C "$QUILL_HOME/worktrees/apache__foo__1" rev-parse HEAD)" = "$HEAD_SHA" ]
+  local c="$RUN/ctx/apache__foo__1"
+  run jq -r '.head_sha, .merge_base, (.diff | join(".."))' "$c/task.json"
+  [ "${lines[0]}" = "$HEAD_SHA" ]
+  [ "${lines[1]}" = "$BASE_SHA" ]
+  [ "${lines[2]}" = "$BASE_SHA..$HEAD_SHA" ]
+  # shown as it was then: open, with no outcome in the reason or the history
+  run jq -c '{state, courtReason, merged: .authorHistory.merged, recent: [.authorHistory.recent[].number]}' "$c/meta.json"
+  [ "$output" = '{"state":"OPEN","courtReason":"requested on the command line","merged":2,"recent":[9]}' ]
+  # guidance from the merge base, not main's tip (which has the PR's version)
+  [ "$(cat "$c/guidance/CONTRIBUTING.md.txt")" = "Base rules: run mvn verify." ]
+}
+
+@test "--at: a commit outside the PR's history fails that PR" {
+  queue_with '.sources = ["explicit"] | .reviewAt = "0123456789abcdef0123456789abcdef01234567"'
+  run "$SCRIPTS/prepare.sh" --run-dir "$RUN"
+  [[ "$output" == *"0123456789abcdef0123456789abcdef01234567 isn't in the PR's history"* ]] || false
+  [ "$(printf '%s\n' "$output" | tail -1)" = "prepare: 0 PR(s) ready for review, 1 failed" ]
+  [ "$(jq -r '.prs[0].error | length > 0' "$RUN/dispatch.json")" = "true" ]
+}
+
+@test "a PR that fails without a quill error line is still recorded" {
+  # ctx/ is a file, so the first mkdir fails with only mkdir's own message
+  queue_with '.'
+  : >"$RUN/ctx"
+  run "$SCRIPTS/prepare.sh" --run-dir "$RUN"
+  [ "$(printf '%s\n' "$output" | tail -1)" = "prepare: 0 PR(s) ready for review, 1 failed" ]
+  [ "$(jq -r '.prs[0].error | length > 0' "$RUN/dispatch.json")" = "true" ]
+}
+
 @test "usage errors" {
   run "$SCRIPTS/prepare.sh"
   [ "$status" -eq 64 ]

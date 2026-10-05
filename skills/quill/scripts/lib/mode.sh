@@ -16,16 +16,30 @@ _is_sha() {
 }
 
 # review_mode <owner/name> <N> <base branch> <head sha> [<last reviewed sha>]
+#             [<the PR's own base sha>]
 # Prints a JSON object: {mode, reason, base, mergeBase, head, lastReviewed,
 # diff: [from, to] | null, rangeDiff: [old range, new range] | null}.
+# The merge base is taken against the base branch's tip, unless the head is
+# already in it (a PR merged with a merge commit, or a review pinned to an
+# older commit of one): then that merge base would be the head itself and
+# the diff empty, so it's taken against the PR's own base sha (baseRefOid).
 review_mode() {
-  local repo="$1" number="$2" base="$3" head="$4" last="${5:-}" gd mb old_mb mode reason
+  local repo="$1" number="$2" base="$3" head="$4" last="${5:-}" base_sha="${6:-}" gd base_ref mb old_mb mode reason
   _is_sha "$head" || die "not a full commit SHA: $head"
   [ -z "$last" ] || _is_sha "$last" || die "not a full commit SHA: $last"
+  [ -z "$base_sha" ] || _is_sha "$base_sha" || die "not a full commit SHA: $base_sha"
   git check-ref-format --branch "$base" >/dev/null 2>&1 || die "not a branch name: $base"
   gd="$(repo_git_dir "$repo")" || return 1
-  mb="$(qgit --git-dir="$gd" merge-base "refs/quill/base/$base" "$head")" ||
+  base_ref="refs/quill/base/$base"
+  if qgit --git-dir="$gd" merge-base --is-ancestor "$head" "$base_ref" 2>/dev/null; then
+    if [ -z "$base_sha" ] || ! qgit --git-dir="$gd" cat-file -e "$base_sha^{commit}" 2>/dev/null; then
+      die "$repo#$number's head is already in $base, and its own base commit isn't available to diff against"
+    fi
+    base_ref="$base_sha"
+  fi
+  mb="$(qgit --git-dir="$gd" merge-base "$base_ref" "$head")" ||
     die "no merge base between $base and $repo#$number (fetch first)"
+  [ "$mb" != "$head" ] || die "$repo#$number has no changes against $base to review (its head is in its base)"
 
   if [ -z "$last" ]; then
     mode=full
@@ -52,7 +66,7 @@ review_mode() {
 
   old_mb=""
   if [ "$mode" = range-diff ]; then
-    old_mb="$(qgit --git-dir="$gd" merge-base "refs/quill/base/$base" "$last")" ||
+    old_mb="$(qgit --git-dir="$gd" merge-base "$base_ref" "$last")" ||
       die "no merge base for the previously reviewed head"
   fi
 

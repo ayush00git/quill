@@ -228,8 +228,9 @@ save_one() {
   date_dir="$(resolve_path "$run_dir/../..")"
   path_within "$date_dir" "$home/reviews" || { reject "the run directory isn't inside $home/reviews"; return 0; }
   # A closed or merged PR (asked for by name) gets a note on top, from the
-  # queue's PR state: queue.json is outside the bundle, so the reviewer
-  # never sees it.
+  # queue's PR state. queue.json is outside the bundle, so the note never
+  # reaches the reviewer (meta.json does carry the state, except for a review
+  # pinned with --at).
   local pr_state="" note=""
   if [ -f "$run_dir/queue.json" ]; then
     pr_state="$(jq -r --arg pr "$(jq -r .pr "$task")" \

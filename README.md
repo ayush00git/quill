@@ -56,6 +56,7 @@ Run it from the workspace: posting refuses anywhere else, because the workspace 
 | `/quill:quill list` | rebuild QUEUE.md without reviewing anything |
 | `/quill:quill --repo apache/foo` | also watch every open PR in that repo (repeatable) |
 | `/quill:quill --force` | review again even if the head didn't change |
+| `/quill:quill apache/foo#123 --at <sha>` | review that PR as it was at one of its own commits, for example the one you approved: that commit's code, CI, files and size, without your reviews of that commit or later ones, quill's drafts of later ones, or the PR's outcome. Such a review can't be posted once the PR has moved on |
 | `/quill:quill --run-tests` | also run each PR's affected tests in a throwaway container |
 | `/quill:quill post apache/foo#123` | create the drafted review as a pending GitHub review |
 | `/quill:quill clean` | drop worktrees, refs and state for closed and merged PRs (`clean --dry-run` lists them) |

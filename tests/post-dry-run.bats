@@ -88,6 +88,18 @@ payload() { cat "$QUILL_HOME/post/apache__foo__1.json"; }
   [ ! -e "$QUILL_HOME/post/apache__foo__1.json" ]
 }
 
+@test "a review pinned with --at to an earlier commit of an open PR can't be posted (exit 3)" {
+  # state.json records the pinned commit; GitHub's head is the PR's later one
+  local pinned="1bbcabb50588c22ddb19fa6ee4ce14b5e0506ca8"
+  jq --arg p "$pinned" '.prs["apache/foo#1"].reviewedHeadSha = $p' "$QUILL_HOME/state.json" >"$TEST_TMP/s.json"
+  mv "$TEST_TMP/s.json" "$QUILL_HOME/state.json"
+  pr_state open "$HEAD_SHA"
+  run "$SCRIPTS/post.sh" --dry-run apache/foo#1
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"moved from 1bbcabb to ${HEAD_SHA:0:7}"* ]] || false
+  [ ! -e "$QUILL_HOME/post/apache__foo__1.json" ]
+}
+
 @test "I already have a pending review: stop with exit 4" {
   : >"$GH_STUB_DIR/routes"
   gh_respond 'api --method GET user --jq .login' <<'JSON'

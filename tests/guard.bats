@@ -174,6 +174,11 @@ expect_deny() {
 @test "reviewer Glob: path is required and confined; pattern must be relative" {
   reviewer Glob "$(jq -cn --arg p "$WT" '{pattern: "**/*.go", path: $p}')"
   expect_allow
+  # how agents/pr-reviewer.md tells it to list files
+  reviewer Glob "$(jq -cn --arg p "$WT" '{pattern: "**/*", path: $p}')"
+  expect_allow
+  reviewer Glob "$(jq -cn --arg p "$CTX" '{pattern: "**/*", path: $p}')"
+  expect_allow
   reviewer Glob '{"pattern": "**/*.go"}'
   expect_deny
   local g
